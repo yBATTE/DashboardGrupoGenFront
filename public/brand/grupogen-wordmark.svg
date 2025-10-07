@@ -1,0 +1,25 @@
+<svg viewBox="0 0 760 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GrupoGen">
+  <defs>
+    <linearGradient id="ggAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#005EB8"/>
+    </linearGradient>
+    <style>
+      .word{
+        font: 800 84px/1 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+        letter-spacing: .5px;
+      }
+      .dark{ fill:#0f172a; }      /* azul muy oscuro */
+      .muted{ fill:#334155; }
+    </style>
+  </defs>
+
+  <!-- “Grupo” en oscuro -->
+  <text x="10" y="110" class="word dark">Grupo</text>
+
+  <!-- Pequeño espacio óptico entre palabras -->
+  <text x="330" y="110" class="word muted"> </text>
+
+  <!-- “Gen” con gradiente de acento -->
+  <text x="338" y="110" class="word" fill="url(#ggAccent)">Gen</text>
+</svg>

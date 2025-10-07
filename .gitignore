@@ -1,0 +1,39 @@
+# Ignorar dependencias y artefactos generados
+/node_modules/
+dist/
+build/
+out/
+.cache/
+.vite/
+.parcel-cache/
+
+# Archivos de entorno (nunca commit)
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Coverage y reportes
+coverage/
+.nyc_output/
+
+# TypeScript / compilación
+*.tsbuildinfo
+*.map
+
+# IDEs y OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Otros
+.eslintcache
+*.tgz
+.pnp.*
