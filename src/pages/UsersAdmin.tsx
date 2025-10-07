@@ -57,10 +57,9 @@ export default function UsersAdmin() {
 
     const fn = firstName.trim();
     const ln = lastName.trim();
-    const fullName = (fn + ' ' + ln).trim();
 
     mutation.mutate({
-      name: fullName,              // mantiene compat con backend actual
+      name: firstName,              // mantiene compat con backend actual
       lastName: ln || undefined,   // se envía si existe
       email: email.trim().toLowerCase(),
       role,
