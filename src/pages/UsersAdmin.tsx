@@ -55,12 +55,9 @@ export default function UsersAdmin() {
     setOk(false);
     setErr(null);
 
-    const fn = firstName.trim();
-    const ln = lastName.trim();
-
     mutation.mutate({
       name: firstName,              // mantiene compat con backend actual
-      lastName: ln || undefined,   // se envía si existe
+      lastName: lastName || undefined,   // se envía si existe
       email: email.trim().toLowerCase(),
       role,
     });
