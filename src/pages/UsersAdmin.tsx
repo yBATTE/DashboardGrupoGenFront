@@ -7,23 +7,26 @@ import { createUser } from '../api/users';
 type Role = 'member' | 'admin';
 
 export default function UsersAdmin() {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<Role>('member');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName]   = useState('');
+  const [email, setEmail]         = useState('');
+  const [role, setRole]           = useState<Role>('member');
 
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
 
-  
-
   const mutation = useMutation({
-    mutationFn: (payload: { name?: string; email: string; role?: Role }) =>
-      createUser(payload),
+    mutationFn: (payload: {
+      name: string;
+      email: string;
+      role?: Role;
+      lastName?: string; // opcional para futuros usos en backend
+    }) => createUser(payload),
     onSuccess: () => {
       setOk(true);
       setErr(null);
-      // Si preferís limpiar todos los campos:
-      // setName(''); setEmail(''); setRole('member');
+      // Si querés limpiar los campos:
+      // setFirstName(''); setLastName(''); setEmail(''); setRole('member');
     },
     onError: (e: any) => {
       const msg =
@@ -38,8 +41,9 @@ export default function UsersAdmin() {
   const isValidEmail = (v: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
+  // Hacemos obligatorio el nombre y el email. El apellido puede quedar opcional.
   const canSubmit = Boolean(
-    name.trim() && isValidEmail(email) && (role === 'member' || role === 'admin')
+    firstName.trim() && isValidEmail(email) && (role === 'member' || role === 'admin')
   );
 
   function onSubmit(e: React.FormEvent) {
@@ -50,7 +54,17 @@ export default function UsersAdmin() {
     }
     setOk(false);
     setErr(null);
-    mutation.mutate({ name: name.trim(), email: email.trim().toLowerCase(), role });
+
+    const fn = firstName.trim();
+    const ln = lastName.trim();
+    const fullName = (fn + ' ' + ln).trim();
+
+    mutation.mutate({
+      name: fullName,              // mantiene compat con backend actual
+      lastName: ln || undefined,   // se envía si existe
+      email: email.trim().toLowerCase(),
+      role,
+    });
   }
 
   return (
@@ -60,8 +74,18 @@ export default function UsersAdmin() {
         <input
           className="input"
           placeholder="Nombre"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+        />
+
+        <label className="label" style={{ marginTop: 8 }}>
+          Apellido
+        </label>
+        <input
+          className="input"
+          placeholder="Apellido"
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
         />
 
         <label className="label" style={{ marginTop: 8 }}>
