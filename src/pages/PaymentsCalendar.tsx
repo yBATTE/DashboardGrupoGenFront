@@ -38,8 +38,8 @@ const localizer = dateFnsLocalizer({
 function fullName(u: any): string {
   if (!u) return "—";
   if (typeof u === "string") return u;
-  const composed = [u.name, u.lastName].filter(Boolean).join(" ").trim();
-  return u.displayName || composed || u.email || u._id || "—";
+  const composed = [u.name, (u as any).lastName].filter(Boolean).join(" ").trim();
+  return (u as any).displayName || composed || u.email || u._id || "—";
 }
 function displayUser(u: any): string {
   return fullName(u);
@@ -55,7 +55,6 @@ function useDebounced<T>(value: T, delay = 250) {
   }, [value, delay]);
   return v;
 }
-
 function startOfDayLocal(d: string) {
   const [y, m, day] = d.split("-").map(Number);
   return new Date(y, m - 1, day, 0, 0, 0, 0);
@@ -69,6 +68,14 @@ const SHEET_URL =
   "https://docs.google.com/spreadsheets/d/1ffaM03ZDztLaMM0odRh9fS4-Yx9lpcog8r_a0uBaIqY/edit?gid=1012738625";
 const SHEET_URL_DAY =
   "https://docs.google.com/spreadsheets/d/1ed4LzPSEmPPpQBgCkizcrZT1pSWTrO2XTSfL0VIf7Dc/edit?hl=es&gid=0#gid=0";
+
+type CalendarEvent = {
+  id: string;
+  title: string;
+  start: Date;
+  end: Date;
+  payment: Payment;
+};
 
 /* ===== Página ===== */
 export default function PaymentsCalendar() {
@@ -89,7 +96,7 @@ export default function PaymentsCalendar() {
       }),
   });
 
-  // equipos (para el picker)
+  // equipos (picker)
   const {
     data: teamsData,
     isLoading: loadingTeams,
@@ -116,15 +123,11 @@ export default function PaymentsCalendar() {
 
     const hasUser = (p: any, userId: string) => {
       const arr = Array.isArray(p.assigneeIds) ? p.assigneeIds : [];
-      return arr.some((x: any) =>
-        typeof x === "string" ? x === userId : x?._id === userId
-      );
+      return arr.some((x: any) => (typeof x === "string" ? x === userId : x?._id === userId));
     };
     const hasTeam = (p: any, teamId: string) => {
       const arr = Array.isArray(p.teamIds) ? p.teamIds : [];
-      return arr.some((x: any) =>
-        typeof x === "string" ? x === teamId : x?._id === teamId
-      );
+      return arr.some((x: any) => (typeof x === "string" ? x === teamId : x?._id === teamId));
     };
 
     if (usersSelected.length) {
@@ -138,15 +141,12 @@ export default function PaymentsCalendar() {
     return rows;
   }, [data, usersSelected, teamsSelected]);
 
-  /* ===== Calendario ===== */
-  type CalendarEvent = {
-    id: string;
-    title: string;
-    start: Date;
-    end: Date;
-    payment: Payment;
-  };
-  const events: CalendarEvent[] = useMemo(() => {
+  /* ===== Toggle global (impacta Calendario + Lista) ===== */
+  // "due" = vencimiento (dueAt)  |  "paid" = pagado (paidAt)
+  const [dateMode, setDateMode] = useState<"due" | "paid">("due");
+
+  /* ===== Eventos para ambos modos ===== */
+  const eventsDue: CalendarEvent[] = useMemo(() => {
     const rows = baseFiltered.filter((p) => p.dueAt);
     return rows.map((p) => {
       const start = new Date(p.dueAt!);
@@ -155,15 +155,23 @@ export default function PaymentsCalendar() {
     });
   }, [baseFiltered]);
 
+  const eventsPaid: CalendarEvent[] = useMemo(() => {
+    const rows = baseFiltered.filter((p) => p.status === "paid" && p.paidAt);
+    return rows.map((p) => {
+      const start = new Date(p.paidAt!);
+      const end = addHours(start, 1);
+      return { id: p._id, title: p.title, start, end, payment: p };
+    });
+  }, [baseFiltered]);
+
+  // estilos de eventos
   const eventPropGetter = useCallback((event: CalendarEvent) => {
     const now = new Date();
-    const isPaid = event.payment.status === "paid";
-
     let bg = "#fde68a";
     let color = "#111";
     let border = "1px solid rgba(0,0,0,.08)";
 
-    if (isPaid) {
+    if (event.payment.status === "paid") {
       bg = "#fef3c7";
       color = "#111";
       border = "1px dashed #9CA3AF";
@@ -193,10 +201,7 @@ export default function PaymentsCalendar() {
     };
   }, []);
 
-  const onSelectEvent = useCallback(
-    (e: CalendarEvent) => nav(`/payments/${e.id}`),
-    [nav]
-  );
+  const onSelectEvent = useCallback((e: CalendarEvent) => nav(`/payments/${e.id}`), [nav]);
   const onNavigate = useCallback((date: Date) => setViewDate(date), []);
   const minTime = useMemo(
     () => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0),
@@ -224,9 +229,7 @@ export default function PaymentsCalendar() {
 
   const [sortDue, setSortDue] = useState<"asc" | "desc">("asc");
   const [sortUnpaidFirst, setSortUnpaidFirst] = useState(false);
-
-  const toggleDueSort = () =>
-    setSortDue((prev) => (prev === "asc" ? "desc" : "asc"));
+  const toggleDueSort = () => setSortDue((prev) => (prev === "asc" ? "desc" : "asc"));
   const toggleUnpaidFirst = () =>
     setSortUnpaidFirst((prev) => {
       const next = !prev;
@@ -237,21 +240,25 @@ export default function PaymentsCalendar() {
   const monthList = useMemo(() => {
     const defaultStart = startOfMonth(viewDate).getTime();
     const defaultEnd = endOfMonth(viewDate).getTime();
-
-    const rangeStart = fromDate
-      ? startOfDayLocal(fromDate).getTime()
-      : defaultStart;
+    const rangeStart = fromDate ? startOfDayLocal(fromDate).getTime() : defaultStart;
     const rangeEnd = toDate ? endOfDayLocal(toDate).getTime() : defaultEnd;
-
     const term = dqText.trim().toLowerCase();
 
     const rows = (baseFiltered ?? [])
       .filter((p) => {
-        if (!p.dueAt) return false;
-        const t = new Date(p.dueAt).getTime();
+        const selectedDate =
+          dateMode === "paid" ? (p.paidAt ?? null) : (p.dueAt ?? null);
+
+        if (dateMode === "paid") {
+          if (p.status !== "paid" || !selectedDate) return false;
+        } else {
+          if (!selectedDate) return false;
+        }
+
+        const t = new Date(selectedDate!).getTime();
         if (t < rangeStart || t > rangeEnd) return false;
-        if (term && !String(p.title ?? "").toLowerCase().includes(term))
-          return false;
+
+        if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
         return true;
       })
       .sort((a, b) => {
@@ -260,13 +267,21 @@ export default function PaymentsCalendar() {
           const bp = b.status === "paid" ? 1 : 0;
           if (ap !== bp) return ap - bp;
         }
-        const da = new Date(a.dueAt!).getTime();
-        const db = new Date(b.dueAt!).getTime();
+        const da =
+          dateMode === "paid"
+            ? new Date(a.paidAt ?? 0).getTime()
+            : new Date(a.dueAt ?? 0).getTime();
+        const db =
+          dateMode === "paid"
+            ? new Date(b.paidAt ?? 0).getTime()
+            : new Date(b.dueAt ?? 0).getTime();
         return sortDue === "asc" ? da - db : db - da;
       });
 
     return rows;
-  }, [baseFiltered, viewDate, sortDue, sortUnpaidFirst, fromDate, toDate, dqText]);
+  }, [baseFiltered, viewDate, sortDue, sortUnpaidFirst, fromDate, toDate, dqText, dateMode]);
+
+  const dateHeaderLabel = dateMode === "paid" ? "Pagado" : "Vencimiento";
 
   return (
     <Layout
@@ -299,10 +314,7 @@ export default function PaymentsCalendar() {
     >
       {isLoading && <div className="card">Cargando…</div>}
       {isError && (
-        <div
-          className="card"
-          style={{ borderColor: "var(--danger)", background: "#fff4f4" }}
-        >
+        <div className="card" style={{ borderColor: "var(--danger)", background: "#fff4f4" }}>
           Error.{" "}
           <button className="btn btn-ghost" onClick={() => refetch()}>
             Reintentar
@@ -310,53 +322,136 @@ export default function PaymentsCalendar() {
         </div>
       )}
 
-      {/* ===== Calendario ===== */}
+      {/* ===== Calendario + Toggle arriba ===== */}
       <div className="card" style={{ padding: 0 }}>
         <div
           style={{
             padding: "12px 14px",
             borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
           }}
         >
-          <strong>Calendario de pagos</strong>
-          <span className="muted" style={{ marginLeft: 8 }}>
-            — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido · amarillo:
-            pagado
-          </span>
-        </div>
-        <div style={{ height: 600 }}>
-          <Calendar
-            localizer={localizer}
-            culture="es"
-            events={events}
-            defaultView={Views.MONTH}
-            views={[Views.MONTH, Views.WEEK, Views.DAY]}
-            startAccessor="start"
-            endAccessor="end"
-            onSelectEvent={onSelectEvent}
-            onNavigate={onNavigate}
-            eventPropGetter={eventPropGetter}
-            toolbar
-            popup
-            min={minTime}
-            max={maxTime}
-            step={30}
-            timeslots={2}
-            scrollToTime={scrollTo}
-            messages={{
-              month: "Mes",
-              week: "Semana",
-              day: "Día",
-              today: "Hoy",
-              previous: "Anterior",
-              next: "Siguiente",
-              allDay: "Todo el día",
-              noEventsInRange: "No hay pagos en este rango",
-              date: "Fecha",
-              time: "Hora",
-              event: "Pago",
+          <div>
+            <strong>Calendario de pagos</strong>
+            <span className="muted" style={{ marginLeft: 8 }}>
+              — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido · amarillo: pagado
+            </span>
+          </div>
+
+          {/* Toggle por encima del calendario */}
+          <div
+            style={{
+              display: "inline-flex",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              overflow: "hidden",
             }}
-          />
+          >
+            <button
+              type="button"
+              onClick={() => setDateMode("due")}
+              className="btn btn-ghost"
+              title="Mostrar por fecha de vencimiento"
+              style={{
+                padding: "6px 10px",
+                background: dateMode === "due" ? "var(--bg-soft)" : "transparent",
+                fontWeight: dateMode === "due" ? 800 : 600,
+              }}
+            >
+              Vencimiento
+            </button>
+            <button
+              type="button"
+              onClick={() => setDateMode("paid")}
+              className="btn btn-ghost"
+              title="Mostrar por fecha de pago realizado"
+              style={{
+                padding: "6px 10px",
+                background: dateMode === "paid" ? "var(--bg-soft)" : "transparent",
+                fontWeight: dateMode === "paid" ? 800 : 600,
+                borderLeft: "1px solid var(--border)",
+              }}
+            >
+              Pagado
+            </button>
+          </div>
+        </div>
+
+        {/* Dos calendarios: render condicional para forzar re-mount y refrescar fechas */}
+        <div style={{ height: 600 }}>
+          {dateMode === "due" ? (
+            <Calendar
+              key="calendar-due"
+              localizer={localizer}
+              culture="es"
+              events={eventsDue}
+              defaultView={Views.MONTH}
+              views={[Views.MONTH, Views.WEEK, Views.DAY]}
+              startAccessor="start"
+              endAccessor="end"
+              onSelectEvent={onSelectEvent}
+              onNavigate={onNavigate}
+              eventPropGetter={eventPropGetter}
+              toolbar
+              popup
+              min={minTime}
+              max={maxTime}
+              step={30}
+              timeslots={2}
+              scrollToTime={scrollTo}
+              messages={{
+                month: "Mes",
+                week: "Semana",
+                day: "Día",
+                today: "Hoy",
+                previous: "Anterior",
+                next: "Siguiente",
+                allDay: "Todo el día",
+                noEventsInRange: "No hay pagos en este rango",
+                date: "Fecha",
+                time: "Hora",
+                event: "Pago",
+              }}
+            />
+          ) : (
+            <Calendar
+              key="calendar-paid"
+              localizer={localizer}
+              culture="es"
+              events={eventsPaid}
+              defaultView={Views.MONTH}
+              views={[Views.MONTH, Views.WEEK, Views.DAY]}
+              startAccessor="start"
+              endAccessor="end"
+              onSelectEvent={onSelectEvent}
+              onNavigate={onNavigate}
+              eventPropGetter={eventPropGetter}
+              toolbar
+              popup
+              min={minTime}
+              max={maxTime}
+              step={30}
+              timeslots={2}
+              scrollToTime={scrollTo}
+              messages={{
+                month: "Mes",
+                week: "Semana",
+                day: "Día",
+                today: "Hoy",
+                previous: "Anterior",
+                next: "Siguiente",
+                allDay: "Todo el día",
+                noEventsInRange: "No hay pagos realizados en este rango",
+                date: "Fecha",
+                time: "Hora",
+                event: "Pago",
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -383,6 +478,7 @@ export default function PaymentsCalendar() {
             </button>
           )}
         </div>
+
         {teamsSelected.length > 0 && (
           <div className="chips" style={{ marginTop: 8 }}>
             {teamsSelected.map((t) => (
@@ -390,9 +486,7 @@ export default function PaymentsCalendar() {
                 {t.name}
                 <button
                   type="button"
-                  onClick={() =>
-                    setTeamsSelected((prev) => prev.filter((x) => x._id !== t._id))
-                  }
+                  onClick={() => setTeamsSelected((prev) => prev.filter((x) => x._id !== t._id))}
                 >
                   ×
                 </button>
@@ -405,14 +499,11 @@ export default function PaymentsCalendar() {
           Usuario(s)
         </label>
         <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={() => setOpenUsers(true)}
-          >
+          <button type="button" className="btn btn-outline" onClick={() => setOpenUsers(true)}>
             + Elegir usuarios
           </button>
         </div>
+
         {usersSelected.length > 0 && (
           <div className="chips" style={{ marginTop: 8 }}>
             {usersSelected.map((u) => (
@@ -420,9 +511,7 @@ export default function PaymentsCalendar() {
                 {fullName(u) || u.email}
                 <button
                   type="button"
-                  onClick={() =>
-                    setUsersSelected((prev) => prev.filter((x) => x._id !== u._id))
-                  }
+                  onClick={() => setUsersSelected((prev) => prev.filter((x) => x._id !== u._id))}
                 >
                   ×
                 </button>
@@ -448,7 +537,9 @@ export default function PaymentsCalendar() {
         </h2>
 
         <div className="btn-row" style={{ alignItems: "center" }}>
-          <span className="muted" style={{ fontSize: 12 }}>Rango para la lista:</span>
+          <span className="muted" style={{ fontSize: 12 }}>
+            Rango para la lista:
+          </span>
           <input
             type="date"
             className="input"
@@ -504,12 +595,12 @@ export default function PaymentsCalendar() {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span>Vencimiento</span>
+              <span>{dateHeaderLabel}</span>
               <button
                 type="button"
                 className="btn btn-ghost"
                 onClick={toggleDueSort}
-                title="Ordenar por vencimiento"
+                title={`Ordenar por ${dateHeaderLabel.toLowerCase()}`}
                 style={{ padding: "2px 6px", fontSize: 12 }}
               >
                 {sortDue === "asc" ? "▲" : "▼"}
@@ -539,10 +630,12 @@ export default function PaymentsCalendar() {
 
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {monthList.map((p) => {
-              const dueStr = formatDateTime(p.dueAt);
+              const dateStr =
+                dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt);
 
               let badgeStyle: React.CSSProperties = {};
               let badgeText = "Pendiente";
+
               if (p.status === "paid") {
                 badgeText = "Pagado";
                 badgeStyle = {
@@ -592,7 +685,9 @@ export default function PaymentsCalendar() {
                     </span>
                   </div>
 
-                  <div className="muted">{dueStr}</div>
+                  <div className="muted">
+                    {dateMode === "paid" && p.status !== "paid" ? "—" : dateStr}
+                  </div>
 
                   <div>
                     <span className="badge" style={badgeStyle}>
@@ -606,8 +701,8 @@ export default function PaymentsCalendar() {
                     </div>
                     {p.status === "paid" && (
                       <div>
-                        Pagado por: <b>{displayUser(p.paidBy)}</b>
-                        {p.paidAt ? ` · el ${formatDateTime(p.paidAt)}` : ""}
+                        Pagado por: <b>{displayUser(p.paidBy)}</b>{" "}
+                        {p.paidAt ? `· el ${formatDateTime(p.paidAt)}` : ""}
                       </div>
                     )}
                   </div>
@@ -621,7 +716,7 @@ export default function PaymentsCalendar() {
       {/* ===== Modales ===== */}
       {openTeams && (
         <TeamPickerModal
-          teams={teamsData ?? []}           // ✅ se pasa la prop teams
+          teams={teamsData ?? []}
           initiallySelected={teamsSelected}
           onClose={() => setOpenTeams(false)}
           onSave={(sel) => {
@@ -654,7 +749,6 @@ function ModalBase({
   children: React.ReactNode;
   onClose: () => void;
 }) {
-  // ❌ Sin ESC ni click-outside
   return (
     <div
       role="dialog"
@@ -703,7 +797,6 @@ function TeamPickerModal({
 }) {
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 200);
-
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initiallySelected.map((t) => t._id))
   );
@@ -720,7 +813,6 @@ function TeamPickerModal({
     return pool.filter((t) => t.name.toLowerCase().includes(term));
   }, [pool, dq]);
 
-  // ⬇️ mostrar en la lista SOLO los no seleccionados
   const available = useMemo(
     () => filtered.filter((t) => !selectedIds.has(t._id)),
     [filtered, selectedIds]
@@ -743,7 +835,6 @@ function TeamPickerModal({
   }
 
   const hasSel = selectedIds.size > 0;
-
   const rowStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -766,7 +857,6 @@ function TeamPickerModal({
         Click en un equipo para agregarlo. Usá “×” en la barra para quitarlo.
       </div>
 
-      {/* Marco de altura fija: lista con scroll + seleccionados con transición */}
       <div
         style={{
           marginTop: 10,
@@ -777,7 +867,6 @@ function TeamPickerModal({
           flexDirection: "column",
         }}
       >
-        {/* Lista (solo NO seleccionados) */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {available.map((t) => (
             <div
@@ -789,7 +878,6 @@ function TeamPickerModal({
               style={rowStyle}
               title="Agregar a seleccionados"
             >
-              {/* sin checkbox */}
               <div style={{ fontWeight: 700 }}>{t.name}</div>
               <div className="muted">{t.members?.length ?? 0} miembro/s</div>
             </div>
@@ -801,7 +889,6 @@ function TeamPickerModal({
           )}
         </div>
 
-        {/* Seleccionados */}
         <div
           style={{
             borderTop: "1px solid var(--border)",
@@ -822,7 +909,9 @@ function TeamPickerModal({
               return (
                 <span key={id} className="chip">
                   {t.name}
-                  <button type="button" onClick={() => toggle(id)}>×</button>
+                  <button type="button" onClick={() => toggle(id)}>
+                    ×
+                  </button>
                 </span>
               );
             })}
@@ -855,7 +944,6 @@ function UserPickerModal({
 }) {
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 250);
-
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initiallySelected.map((u) => u._id))
   );
@@ -883,7 +971,6 @@ function UserPickerModal({
     [results, exclude]
   );
 
-  // ⬇️ solo los NO seleccionados en la lista
   const available = useMemo(
     () => filtered.filter((u) => !selectedIds.has(u._id)),
     [filtered, selectedIds]
@@ -905,7 +992,6 @@ function UserPickerModal({
   }
 
   const hasSel = selectedIds.size > 0;
-
   const rowStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -938,7 +1024,6 @@ function UserPickerModal({
           flexDirection: "column",
         }}
       >
-        {/* Lista (solo no seleccionados) */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {isLoading && <div className="card">Buscando…</div>}
           {!isLoading && !available.length && (
@@ -961,7 +1046,6 @@ function UserPickerModal({
                 style={rowStyle}
                 title="Agregar a seleccionados"
               >
-                {/* sin checkbox */}
                 <div style={{ fontWeight: 700 }}>{label}</div>
                 <div className="muted">{u.email}</div>
               </div>
@@ -969,7 +1053,6 @@ function UserPickerModal({
           })}
         </div>
 
-        {/* Seleccionados */}
         <div
           style={{
             borderTop: "1px solid var(--border)",
@@ -994,7 +1077,9 @@ function UserPickerModal({
               return (
                 <span key={id} className="chip">
                   {label}
-                  <button type="button" onClick={() => toggle(id)}>×</button>
+                  <button type="button" onClick={() => toggle(id)}>
+                    ×
+                  </button>
                 </span>
               );
             })}
@@ -1013,4 +1098,3 @@ function UserPickerModal({
     </ModalBase>
   );
 }
-
