@@ -4,7 +4,8 @@ import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Layout from "../components/Layout";
 
-import { Calendar, dateFnsLocalizer, EventProps, ToolbarProps, View, Views } from "react-big-calendar";
+import { Calendar, dateFnsLocalizer, Views } from "react-big-calendar";
+import type { ToolbarProps, View, EventProps } from "react-big-calendar";
 import {
   format as fmt,
   parse,
@@ -42,8 +43,178 @@ const SHEET_URL =
 const SHEET_URL_DAY =
   "https://docs.google.com/spreadsheets/d/1ed4LzPSEmPPpQBgCkizcrZT1pSWTrO2XTSfL0VIf7Dc/edit?gid=0";
 
-/* ========= THEME: Toolbar & Event ========= */
+/* ===== Utils ===== */
+function fullName(u: any): string {
+  if (!u) return "—";
+  if (typeof u === "string") return u;
+  const composed = [u.name, (u as any).lastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  return (u as any).displayName || composed || u.email || u._id || "—";
+}
+function displayUser(u: any): string {
+  return fullName(u);
+}
+const formatDateTime = (iso?: string | null) =>
+  iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "—";
 
+function useDebounced<T>(value: T, delay = 250) {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return v;
+}
+function startOfDayLocal(d: string) {
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day, 0, 0, 0, 0);
+}
+function endOfDayLocal(d: string) {
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day, 23, 59, 59, 999);
+}
+
+/* ===== Loader overlay ===== */
+function PageLoader({
+  visible,
+  text = "Cargando…",
+}: {
+  visible: boolean;
+  text?: string;
+}) {
+  if (!visible) return null;
+  return (
+    <div
+      aria-busy="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(255,255,255,.85)",
+        backdropFilter: "blur(2px)",
+        zIndex: 9999,
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <div style={{ display: "grid", gap: 12, placeItems: "center" }}>
+        <svg
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          role="img"
+          aria-label="cargando"
+        >
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+            fill="none"
+            opacity="0.15"
+          />
+          <path
+            d="M22 12a10 10 0 0 0-10-10"
+            stroke="currentColor"
+            strokeWidth="4"
+            fill="none"
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 12 12"
+              to="360 12 12"
+              dur="0.8s"
+              repeatCount="indefinite"
+            />
+          </path>
+        </svg>
+        <div style={{ fontWeight: 800 }}>{text}</div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>
+          Preparando calendario y lista de pagos…
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Helpers de exportación (XLSX/CSV) ===== */
+function fmtDate(iso?: string | null) {
+  return iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "";
+}
+
+function buildExportRows(
+  payments: Payment[],
+  {
+    dateMode,
+    rangeStart,
+    rangeEnd,
+  }: { dateMode: "due" | "paid"; rangeStart: Date; rangeEnd: Date }
+) {
+  const start = rangeStart.getTime();
+  const end = rangeEnd.getTime();
+
+  return payments
+    .filter((p) => {
+      const ref = dateMode === "paid" ? p.paidAt : p.dueAt;
+      if (!ref) return false;
+      const t = new Date(ref).getTime();
+      return t >= start && t <= end;
+    })
+    .map((p) => {
+      const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
+      return {
+        Título: p.title ?? "",
+        MontoARS: p.amount ?? 0,
+        Estado: p.status ?? "",
+        [dateMode === "paid" ? "Pagado" : "Vencimiento"]: fmtDate(refDate),
+        "Creado por": displayUser(p.createdBy),
+        "Creado el": fmtDate((p as any)?.createdAt),
+        "Pagado por": p.status === "paid" ? displayUser(p.paidBy) : "",
+        "Pagado el": p.status === "paid" ? fmtDate(p.paidAt) : "",
+        Equipos: (p.teamIds ?? [])
+          .map((t: any) =>
+            typeof t === "string" ? t : t?.name ?? t?._id ?? ""
+          )
+          .join(", "),
+        Asignados: (p.assigneeIds ?? [])
+          .map((u: any) => (typeof u === "string" ? u : fullName(u)))
+          .join(", "),
+        Descripción: p.description ?? "",
+        Id: p._id,
+      };
+    });
+}
+
+function downloadRows(
+  rows: any[],
+  filenameBase: string,
+  format: "xlsx" | "csv" = "xlsx"
+) {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Pagos");
+
+  const ext = format === "csv" ? "csv" : "xlsx";
+  const bookType = format === "csv" ? "csv" : "xlsx";
+  XLSX.writeFile(wb, `${filenameBase}.${ext}`, { bookType });
+}
+
+/* ===== Tipos ===== */
+type CalendarEvent = {
+  id: string;
+  title: string;
+  start: Date;
+  end: Date;
+  payment: Payment;
+  /** synthetic overflow “+N más” */
+  isOverflow?: boolean;
+  overflowEvents?: CalendarEvent[];
+};
+
+/* ========= THEME: Toolbar & Event ========= */
 const ModernToolbar: React.FC<ToolbarProps<CalendarEvent, object>> = ({
   label,
   onNavigate,
@@ -112,7 +283,10 @@ const ModernToolbar: React.FC<ToolbarProps<CalendarEvent, object>> = ({
           overflow: "hidden",
         }}
       >
-        <SegBtn active={view === "month"} onClick={() => onView("month" as View)}>
+        <SegBtn
+          active={view === "month"}
+          onClick={() => onView("month" as View)}
+        >
           Mes
         </SegBtn>
         <SegBtn active={view === "week"} onClick={() => onView("week" as View)}>
@@ -126,160 +300,37 @@ const ModernToolbar: React.FC<ToolbarProps<CalendarEvent, object>> = ({
   );
 };
 
-
-/** “Tarjeta” de evento */
+/** Evento “pill” con soporte para overflow */
 const EventPill: React.FC<EventProps<CalendarEvent>> = ({ event }) => {
+  const isOverflow = event.isOverflow;
   return (
     <div
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 8,
-        padding: "4px 8px",
-        borderRadius: 999,
+        padding: isOverflow ? "2px 6px" : "4px 8px",
+        borderRadius: 12,
         fontWeight: 800,
         boxShadow: "0 2px 8px rgba(0,0,0,.06)",
-        border: "1px dashed rgba(0,0,0,.15)",
+        border: isOverflow
+          ? "1px solid rgba(0,0,0,.15)"
+          : "1px dashed rgba(0,0,0,.15)",
+        background: isOverflow ? "#f3f4f6" : undefined,
       }}
       title={event?.payment?.description || event?.title}
     >
-      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <span
+        style={{
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
         {event.title}
       </span>
     </div>
   );
-};
-
-
-/* ===== Utils ===== */
-function fullName(u: any): string {
-  if (!u) return "—";
-  if (typeof u === "string") return u;
-  const composed = [u.name, (u as any).lastName].filter(Boolean).join(" ").trim();
-  return (u as any).displayName || composed || u.email || u._id || "—";
-}
-function displayUser(u: any): string {
-  return fullName(u);
-}
-const formatDateTime = (iso?: string | null) =>
-  iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "—";
-
-function useDebounced<T>(value: T, delay = 250) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return v;
-}
-function startOfDayLocal(d: string) {
-  const [y, m, day] = d.split("-").map(Number);
-  return new Date(y, m - 1, day, 0, 0, 0, 0);
-}
-function endOfDayLocal(d: string) {
-  const [y, m, day] = d.split("-").map(Number);
-  return new Date(y, m - 1, day, 23, 59, 59, 999);
-}
-
-/* ===== Loader overlay ===== */
-function PageLoader({ visible, text = "Cargando…" }: { visible: boolean; text?: string }) {
-  if (!visible) return null;
-  return (
-    <div
-      aria-busy="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(255,255,255,.85)",
-        backdropFilter: "blur(2px)",
-        zIndex: 9999,
-        display: "grid",
-        placeItems: "center",
-      }}
-    >
-      <div style={{ display: "grid", gap: 12, placeItems: "center" }}>
-        <svg width="48" height="48" viewBox="0 0 24 24" role="img" aria-label="cargando">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.15" />
-          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" fill="none">
-            <animateTransform
-              attributeName="transform"
-              type="rotate"
-              from="0 12 12"
-              to="360 12 12"
-              dur="0.8s"
-              repeatCount="indefinite"
-            />
-          </path>
-        </svg>
-        <div style={{ fontWeight: 800 }}>{text}</div>
-        <div style={{ fontSize: 12, color: "#6b7280" }}>Preparando calendario y lista de pagos…</div>
-      </div>
-    </div>
-  );
-}
-
-/* ===== Helpers de exportación (XLSX/CSV) ===== */
-function fmtDate(iso?: string | null) {
-  return iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "";
-}
-
-function buildExportRows(
-  payments: Payment[],
-  {
-    dateMode,
-    rangeStart,
-    rangeEnd,
-  }: { dateMode: "due" | "paid"; rangeStart: Date; rangeEnd: Date }
-) {
-  const start = rangeStart.getTime();
-  const end = rangeEnd.getTime();
-
-  return payments
-    .filter((p) => {
-      const ref = dateMode === "paid" ? p.paidAt : p.dueAt;
-      if (!ref) return false;
-      const t = new Date(ref).getTime();
-      return t >= start && t <= end;
-    })
-    .map((p) => {
-      const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
-      return {
-        Título: p.title ?? "",
-        MontoARS: p.amount ?? 0,
-        Estado: p.status ?? "",
-        [dateMode === "paid" ? "Pagado" : "Vencimiento"]: fmtDate(refDate),
-        "Creado por": displayUser(p.createdBy),
-        "Creado el": fmtDate((p as any)?.createdAt),
-        "Pagado por": p.status === "paid" ? displayUser(p.paidBy) : "",
-        "Pagado el": p.status === "paid" ? fmtDate(p.paidAt) : "",
-        Equipos: (p.teamIds ?? [])
-          .map((t: any) => (typeof t === "string" ? t : t?.name ?? t?._id ?? ""))
-          .join(", "),
-        Asignados: (p.assigneeIds ?? [])
-          .map((u: any) => (typeof u === "string" ? u : fullName(u)))
-          .join(", "),
-        Descripción: p.description ?? "",
-        Id: p._id,
-      };
-    });
-}
-
-function downloadRows(rows: any[], filenameBase: string, format: "xlsx" | "csv" = "xlsx") {
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Pagos");
-
-  const ext = format === "csv" ? "csv" : "xlsx";
-  const bookType = format === "csv" ? "csv" : "xlsx";
-  XLSX.writeFile(wb, `${filenameBase}.${ext}`, { bookType });
-}
-
-type CalendarEvent = {
-  id: string;
-  title: string;
-  start: Date;
-  end: Date;
-  payment: Payment;
 };
 
 /* ===== Dropdown simple ===== */
@@ -392,8 +443,9 @@ function DropdownItem({
 export default function PaymentsCalendar() {
   const nav = useNavigate();
 
-  // fecha visible
+  // fecha visible + view
   const [viewDate, setViewDate] = useState(new Date());
+  const [view, setView] = useState<View>(Views.MONTH);
   const monthStart = useMemo(() => startOfMonth(viewDate), [viewDate]);
   const monthEnd = useMemo(() => endOfMonth(viewDate), [viewDate]);
 
@@ -426,7 +478,13 @@ export default function PaymentsCalendar() {
   });
 
   // ===== Usuario actual (rol) =====
-  type Me = { _id: string; name?: string; lastName?: string; email: string; roles?: string[] };
+  type Me = {
+    _id: string;
+    name?: string;
+    lastName?: string;
+    email: string;
+    roles?: string[];
+  };
   const { data: me, isLoading: loadingMe } = useQuery<Me>({
     queryKey: ["me"],
     queryFn: getMe,
@@ -435,7 +493,8 @@ export default function PaymentsCalendar() {
   const isAdmin = !!me?.roles?.some((r) => String(r).toLowerCase() === "admin");
 
   // Loader overlay visible en primera carga
-  const bigLoaderVisible = (loadingPayments || loadingTeams || loadingMe) && !payments;
+  const bigLoaderVisible =
+    (loadingPayments || loadingTeams || loadingMe) && !payments;
 
   /* ===== Filtros ===== */
   const [teamsSelected, setTeamsSelected] = useState<Team[]>([]);
@@ -454,11 +513,15 @@ export default function PaymentsCalendar() {
 
     const hasUser = (p: any, userId: string) => {
       const arr = Array.isArray(p.assigneeIds) ? p.assigneeIds : [];
-      return arr.some((x: any) => (typeof x === "string" ? x === userId : x?._id === userId));
+      return arr.some((x: any) =>
+        typeof x === "string" ? x === userId : x?._id === userId
+      );
     };
     const hasTeam = (p: any, teamId: string) => {
       const arr = Array.isArray(p.teamIds) ? p.teamIds : [];
-      return arr.some((x: any) => (typeof x === "string" ? x === teamId : x?._id === teamId));
+      return arr.some((x: any) =>
+        typeof x === "string" ? x === teamId : x?._id === teamId
+      );
     };
 
     if (usersSelected.length) {
@@ -475,8 +538,8 @@ export default function PaymentsCalendar() {
   /* ===== Toggle global (impacta Calendario + Lista) ===== */
   const [dateMode, setDateMode] = useState<"due" | "paid">("due");
 
-  /* ===== Eventos ===== */
-  const eventsDue: CalendarEvent[] = useMemo(() => {
+  /* ===== Eventos base (sin agrupar) ===== */
+  const eventsBaseDue: CalendarEvent[] = useMemo(() => {
     const rows = baseFiltered.filter((p) => p.dueAt);
     return rows.map((p) => {
       const start = new Date(p.dueAt!);
@@ -485,7 +548,7 @@ export default function PaymentsCalendar() {
     });
   }, [baseFiltered]);
 
-  const eventsPaid: CalendarEvent[] = useMemo(() => {
+  const eventsBasePaid: CalendarEvent[] = useMemo(() => {
     const rows = baseFiltered.filter((p) => p.status === "paid" && p.paidAt);
     return rows.map((p) => {
       const start = new Date(p.paidAt!);
@@ -494,8 +557,84 @@ export default function PaymentsCalendar() {
     });
   }, [baseFiltered]);
 
+  /* ===== Agrupar por día en vista MONTH (máx. 2 visibles + “+N más”) ===== */
+  const MAX_DAY_EVENTS = 2;
+
+  function groupForMonth(events: CalendarEvent[]): CalendarEvent[] {
+    const keyOf = (d: Date) => fmt(d, "yyyy-MM-dd");
+    const byDay = new Map<string, CalendarEvent[]>();
+
+    events.forEach((e) => {
+      const k = keyOf(e.start);
+      const arr = byDay.get(k) ?? [];
+      arr.push(e);
+      byDay.set(k, arr);
+    });
+
+    const out: CalendarEvent[] = [];
+
+    for (const [k, arrRaw] of byDay.entries()) {
+      const arr = arrRaw
+        .slice()
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+      if (arr.length <= 1) {
+        // 0 o 1 => mostrar tal cual
+        out.push(...arr);
+        continue;
+      }
+
+      // 2 o más => 1er pago + "+N más" (N = total-1)
+      const [first, ...rest] = arr;
+      out.push(first);
+
+      const [yy, mm, dd] = k.split("-").map(Number);
+      const overflowEvent: CalendarEvent = {
+        id: `overflow-${k}-${rest.length}`,
+        title: `+${rest.length} más`,
+        start: new Date(yy, mm - 1, dd, 12, 0, 0, 0),
+        end: new Date(yy, mm - 1, dd, 12, 30, 0, 0), // MISMO día
+        payment: {
+          _id: `overflow-${k}`,
+          title: "",
+          amount: 0,
+          status: "pending",
+        } as any,
+        isOverflow: true,
+        overflowEvents: rest,
+      };
+
+      out.push(overflowEvent);
+    }
+
+    return out;
+  }
+
+  const eventsDue: CalendarEvent[] = useMemo(() => {
+    return view === Views.MONTH ? groupForMonth(eventsBaseDue) : eventsBaseDue;
+  }, [eventsBaseDue, view]);
+
+  const eventsPaid: CalendarEvent[] = useMemo(() => {
+    return view === Views.MONTH
+      ? groupForMonth(eventsBasePaid)
+      : eventsBasePaid;
+  }, [eventsBasePaid, view]);
+
   // estilos de eventos
   const eventPropGetter = useCallback((event: CalendarEvent) => {
+    if (event.isOverflow) {
+      return {
+        style: {
+          backgroundColor: "#e5e7eb",
+          color: "#111827",
+          border: "1px solid rgba(0,0,0,.15)",
+          borderRadius: 8,
+          fontWeight: 800,
+          padding: "2px 6px",
+        },
+      };
+    }
+
     const now = new Date();
     let bg = "#fde68a";
     let color = "#111";
@@ -531,11 +670,35 @@ export default function PaymentsCalendar() {
     };
   }, []);
 
-  const onSelectEvent = useCallback((e: CalendarEvent) => nav(`/payments/${e.id}`), [nav]);
+  /* ===== Overflow modal ===== */
+  const [overflowList, setOverflowList] = useState<CalendarEvent[] | null>(
+    null
+  );
+
+  const onSelectEvent = useCallback(
+    (e: CalendarEvent) => {
+      if (e.isOverflow && e.overflowEvents?.length) {
+        setOverflowList(e.overflowEvents);
+      } else {
+        nav(`/payments/${e.id}`);
+      }
+    },
+    [nav]
+  );
+
   const onNavigate = useCallback((date: Date) => setViewDate(date), []);
-  const minTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0), []);
-  const maxTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 18), 0), 0), []);
-  const scrollTo = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 8), 0), 0), []);
+  const minTime = useMemo(
+    () => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0),
+    []
+  );
+  const maxTime = useMemo(
+    () => setSeconds(setMinutes(setHours(new Date(), 18), 0), 0),
+    []
+  );
+  const scrollTo = useMemo(
+    () => setSeconds(setMinutes(setHours(new Date(), 8), 0), 0),
+    []
+  );
 
   /* ===== Lista ===== */
   const [fromDate, setFromDate] = useState<string>("");
@@ -550,7 +713,8 @@ export default function PaymentsCalendar() {
 
   const [sortDue, setSortDue] = useState<"asc" | "desc">("asc");
   const [sortUnpaidFirst, setSortUnpaidFirst] = useState(false);
-  const toggleDueSort = () => setSortDue((prev) => (prev === "asc" ? "desc" : "asc"));
+  const toggleDueSort = () =>
+    setSortDue((prev) => (prev === "asc" ? "desc" : "asc"));
   const toggleUnpaidFirst = () =>
     setSortUnpaidFirst((prev) => {
       const next = !prev;
@@ -561,13 +725,16 @@ export default function PaymentsCalendar() {
   const monthList = useMemo(() => {
     const defaultStart = startOfMonth(viewDate).getTime();
     const defaultEnd = endOfMonth(viewDate).getTime();
-    const rangeStart = fromDate ? startOfDayLocal(fromDate).getTime() : defaultStart;
+    const rangeStart = fromDate
+      ? startOfDayLocal(fromDate).getTime()
+      : defaultStart;
     const rangeEnd = toDate ? endOfDayLocal(toDate).getTime() : defaultEnd;
     const term = dqText.trim().toLowerCase();
 
     const rows = (baseFiltered ?? [])
       .filter((p) => {
-        const selectedDate = dateMode === "paid" ? (p.paidAt ?? null) : (p.dueAt ?? null);
+        const selectedDate =
+          dateMode === "paid" ? p.paidAt ?? null : p.dueAt ?? null;
         if (dateMode === "paid") {
           if (p.status !== "paid" || !selectedDate) return false;
         } else {
@@ -575,7 +742,13 @@ export default function PaymentsCalendar() {
         }
         const t = new Date(selectedDate!).getTime();
         if (t < rangeStart || t > rangeEnd) return false;
-        if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
+        if (
+          term &&
+          !String(p.title ?? "")
+            .toLowerCase()
+            .includes(term)
+        )
+          return false;
         return true;
       })
       .sort((a, b) => {
@@ -596,7 +769,16 @@ export default function PaymentsCalendar() {
       });
 
     return rows;
-  }, [baseFiltered, viewDate, sortDue, sortUnpaidFirst, fromDate, toDate, dqText, dateMode]);
+  }, [
+    baseFiltered,
+    viewDate,
+    sortDue,
+    sortUnpaidFirst,
+    fromDate,
+    toDate,
+    dqText,
+    dateMode,
+  ]);
 
   const dateHeaderLabel = dateMode === "paid" ? "Pagado" : "Vencimiento";
 
@@ -641,7 +823,11 @@ export default function PaymentsCalendar() {
         59,
         999
       );
-      const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: start, rangeEnd: end });
+      const rows = buildExportRows(baseFiltered, {
+        dateMode,
+        rangeStart: start,
+        rangeEnd: end,
+      });
       const base = `${fileBaseName}_${fmt(viewDate, "yyyy-MM-dd")}`;
       downloadRows(rows, base, format);
     },
@@ -660,8 +846,12 @@ export default function PaymentsCalendar() {
                 🔗 Ver online
               </DropdownItem>
             )}
-            <DropdownItem onClick={() => exportMonth("xlsx")}>⬇️ Descargar .xlsx</DropdownItem>
-            <DropdownItem onClick={() => exportMonth("csv")}>⬇️ Descargar .csv</DropdownItem>
+            <DropdownItem onClick={() => exportMonth("xlsx")}>
+              ⬇️ Descargar .xlsx
+            </DropdownItem>
+            <DropdownItem onClick={() => exportMonth("csv")}>
+              ⬇️ Descargar .csv
+            </DropdownItem>
           </Dropdown>
 
           {/* Menú: Excel por día */}
@@ -671,8 +861,12 @@ export default function PaymentsCalendar() {
                 🔗 Ver online
               </DropdownItem>
             )}
-            <DropdownItem onClick={() => exportDay("xlsx")}>⬇️ Descargar .xlsx (día)</DropdownItem>
-            <DropdownItem onClick={() => exportDay("csv")}>⬇️ Descargar .csv (día)</DropdownItem>
+            <DropdownItem onClick={() => exportDay("xlsx")}>
+              ⬇️ Descargar .xlsx (día)
+            </DropdownItem>
+            <DropdownItem onClick={() => exportDay("csv")}>
+              ⬇️ Descargar .csv (día)
+            </DropdownItem>
           </Dropdown>
 
           <Link to="/new/payments" className="btn btn-primary">
@@ -685,7 +879,10 @@ export default function PaymentsCalendar() {
       <PageLoader visible={bigLoaderVisible} />
 
       {errorPayments && (
-        <div className="card" style={{ borderColor: "var(--danger)", background: "#fff4f4" }}>
+        <div
+          className="card"
+          style={{ borderColor: "var(--danger)", background: "#fff4f4" }}
+        >
           Error.{" "}
           <button className="btn btn-ghost" onClick={() => refetch()}>
             Reintentar
@@ -694,7 +891,10 @@ export default function PaymentsCalendar() {
       )}
 
       {/* ===== Calendario + Toggle arriba ===== */}
-      <div className="card" style={{ padding: 0, opacity: bigLoaderVisible ? 0.35 : 1 }}>
+      <div
+        className="card"
+        style={{ padding: 0, opacity: bigLoaderVisible ? 0.35 : 1 }}
+      >
         <div
           style={{
             padding: "12px 14px",
@@ -709,7 +909,8 @@ export default function PaymentsCalendar() {
           <div>
             <strong>Calendario de pagos</strong>
             <span className="muted" style={{ marginLeft: 8 }}>
-              — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido · amarillo: pagado
+              — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido ·
+              amarillo: pagado
             </span>
             {fetchingPayments && (
               <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
@@ -734,7 +935,8 @@ export default function PaymentsCalendar() {
               title="Mostrar por fecha de vencimiento"
               style={{
                 padding: "6px 10px",
-                background: dateMode === "due" ? "var(--bg-soft)" : "transparent",
+                background:
+                  dateMode === "due" ? "var(--bg-soft)" : "transparent",
                 fontWeight: dateMode === "due" ? 800 : 600,
               }}
             >
@@ -747,7 +949,8 @@ export default function PaymentsCalendar() {
               title="Mostrar por fecha de pago realizado"
               style={{
                 padding: "6px 10px",
-                background: dateMode === "paid" ? "var(--bg-soft)" : "transparent",
+                background:
+                  dateMode === "paid" ? "var(--bg-soft)" : "transparent",
                 fontWeight: dateMode === "paid" ? 800 : 600,
                 borderLeft: "1px solid var(--border)",
               }}
@@ -766,6 +969,8 @@ export default function PaymentsCalendar() {
               culture="es"
               events={eventsDue}
               defaultView={Views.MONTH}
+              view={view}
+              onView={(v) => setView(v)}
               views={[Views.MONTH, Views.WEEK, Views.DAY]}
               startAccessor="start"
               endAccessor="end"
@@ -773,8 +978,6 @@ export default function PaymentsCalendar() {
               onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
               components={{ toolbar: ModernToolbar, event: EventPill }}
-              className="rbc-theme-gen"
-              toolbar
               popup
               min={minTime}
               max={maxTime}
@@ -793,6 +996,7 @@ export default function PaymentsCalendar() {
                 date: "Fecha",
                 time: "Hora",
                 event: "Pago",
+                showMore: (total) => `+${total} más`,
               }}
             />
           ) : (
@@ -802,6 +1006,8 @@ export default function PaymentsCalendar() {
               culture="es"
               events={eventsPaid}
               defaultView={Views.MONTH}
+              view={view}
+              onView={(v) => setView(v)}
               views={[Views.MONTH, Views.WEEK, Views.DAY]}
               startAccessor="start"
               endAccessor="end"
@@ -809,8 +1015,6 @@ export default function PaymentsCalendar() {
               onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
               components={{ toolbar: ModernToolbar, event: EventPill }}
-              className="rbc-theme-gen"
-              toolbar
               popup
               min={minTime}
               max={maxTime}
@@ -829,6 +1033,7 @@ export default function PaymentsCalendar() {
                 date: "Fecha",
                 time: "Hora",
                 event: "Pago",
+                showMore: (total) => `+${total} más`,
               }}
             />
           )}
@@ -836,7 +1041,10 @@ export default function PaymentsCalendar() {
       </div>
 
       {/* ===== Filtros ===== */}
-      <div className="card" style={{ marginTop: 12, opacity: bigLoaderVisible ? 0.35 : 1 }}>
+      <div
+        className="card"
+        style={{ marginTop: 12, opacity: bigLoaderVisible ? 0.35 : 1 }}
+      >
         <div className="card-sub" style={{ marginBottom: 8 }}>
           Filtros (afectan al calendario y a la lista)
         </div>
@@ -853,7 +1061,11 @@ export default function PaymentsCalendar() {
             + Elegir equipos
           </button>
           {(usersSelected.length > 0 || teamsSelected.length > 0) && (
-            <button type="button" className="btn btn-ghost" onClick={clearFilters}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={clearFilters}
+            >
               Limpiar filtros
             </button>
           )}
@@ -866,7 +1078,11 @@ export default function PaymentsCalendar() {
                 {t.name}
                 <button
                   type="button"
-                  onClick={() => setTeamsSelected((prev) => prev.filter((x) => x._id !== t._id))}
+                  onClick={() =>
+                    setTeamsSelected((prev) =>
+                      prev.filter((x) => x._id !== t._id)
+                    )
+                  }
                 >
                   ×
                 </button>
@@ -879,7 +1095,11 @@ export default function PaymentsCalendar() {
           Usuario(s)
         </label>
         <div className="btn-row">
-          <button type="button" className="btn btn-outline" onClick={() => setOpenUsers(true)}>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => setOpenUsers(true)}
+          >
             + Elegir usuarios
           </button>
         </div>
@@ -891,7 +1111,11 @@ export default function PaymentsCalendar() {
                 {fullName(u) || u.email}
                 <button
                   type="button"
-                  onClick={() => setUsersSelected((prev) => prev.filter((x) => x._id !== u._id))}
+                  onClick={() =>
+                    setUsersSelected((prev) =>
+                      prev.filter((x) => x._id !== u._id)
+                    )
+                  }
                 >
                   ×
                 </button>
@@ -938,7 +1162,11 @@ export default function PaymentsCalendar() {
             style={{ width: 150 }}
           />
           {(fromDate || toDate) && (
-            <button type="button" className="btn btn-ghost" onClick={clearRange}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={clearRange}
+            >
               Limpiar
             </button>
           )}
@@ -947,11 +1175,21 @@ export default function PaymentsCalendar() {
 
       {/* ===== Lista ===== */}
       {!monthList.length ? (
-        <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
+        <div
+          className="card"
+          style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}
+        >
           No hay pagos con los filtros actuales.
         </div>
       ) : (
-        <div className="card" style={{ padding: 0, marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
+        <div
+          className="card"
+          style={{
+            padding: 0,
+            marginTop: 8,
+            opacity: bigLoaderVisible ? 0.35 : 1,
+          }}
+        >
           <div
             style={{
               display: "grid",
@@ -980,7 +1218,9 @@ export default function PaymentsCalendar() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => setSortDue((p) => (p === "asc" ? "desc" : "asc"))}
+                onClick={() =>
+                  setSortDue((p) => (p === "asc" ? "desc" : "asc"))
+                }
                 title={`Ordenar por ${dateHeaderLabel.toLowerCase()}`}
                 style={{ padding: "2px 6px", fontSize: 12 }}
               >
@@ -998,7 +1238,9 @@ export default function PaymentsCalendar() {
                 style={{
                   padding: "2px 6px",
                   fontSize: 12,
-                  border: sortUnpaidFirst ? "1px solid var(--border)" : "1px solid transparent",
+                  border: sortUnpaidFirst
+                    ? "1px solid var(--border)"
+                    : "1px solid transparent",
                   borderRadius: 8,
                 }}
               >
@@ -1012,7 +1254,9 @@ export default function PaymentsCalendar() {
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {monthList.map((p) => {
               const dateStr =
-                dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt);
+                dateMode === "paid"
+                  ? formatDateTime(p.paidAt)
+                  : formatDateTime(p.dueAt);
 
               let badgeStyle: React.CSSProperties = {};
               let badgeText = "Pendiente";
@@ -1093,6 +1337,7 @@ export default function PaymentsCalendar() {
           </ul>
         </div>
       )}
+
       {/* ===== Modales ===== */}
       {openTeams && (
         <TeamPickerModal
@@ -1114,6 +1359,37 @@ export default function PaymentsCalendar() {
             setOpenUsers(false);
           }}
         />
+      )}
+
+      {/* Modal con overflow de eventos del día */}
+      {overflowList && (
+        <ModalBase
+          title="Pagos de este día"
+          onClose={() => setOverflowList(null)}
+        >
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {overflowList.map((e) => (
+              <li
+                key={e.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "10px 12px",
+                  borderTop: "1px solid var(--border)",
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>{e.title}</div>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => nav(`/payments/${e.id}`)}
+                >
+                  Abrir
+                </button>
+              </li>
+            ))}
+          </ul>
+        </ModalBase>
       )}
     </Layout>
   );
@@ -1254,7 +1530,9 @@ function TeamPickerModal({
               role="button"
               tabIndex={0}
               onClick={() => toggle(t._id)}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggle(t._id)}
+              onKeyDown={(e) =>
+                (e.key === "Enter" || e.key === " ") && toggle(t._id)
+              }
               style={rowStyle}
               title="Agregar a seleccionados"
             >
@@ -1276,7 +1554,8 @@ function TeamPickerModal({
             maxHeight: hasSel ? 200 : 0,
             opacity: hasSel ? 1 : 0,
             overflow: "hidden",
-            transition: "max-height .25s ease, opacity .2s ease, padding .2s ease",
+            transition:
+              "max-height .25s ease, opacity .2s ease, padding .2s ease",
           }}
         >
           <div className="muted" style={{ marginBottom: 6 }}>
@@ -1327,8 +1606,8 @@ function UserPickerModal({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initiallySelected.map((u) => u._id))
   );
-  const [cache, setCache] = useState<Record<string, BasicUser>>(
-    () => Object.fromEntries(initiallySelected.map((u) => [u._id, u]))
+  const [cache, setCache] = useState<Record<string, BasicUser>>(() =>
+    Object.fromEntries(initiallySelected.map((u) => [u._id, u]))
   );
 
   const { data: results, isLoading } = useQuery<BasicUser[]>({
@@ -1423,7 +1702,9 @@ function UserPickerModal({
                 role="button"
                 tabIndex={0}
                 onClick={() => toggle(u._id)}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggle(u._id)}
+                onKeyDown={(e) =>
+                  (e.key === "Enter" || e.key === " ") && toggle(u._id)
+                }
                 style={rowStyle}
                 title="Agregar a seleccionados"
               >
@@ -1441,7 +1722,8 @@ function UserPickerModal({
             maxHeight: hasSel ? 200 : 0,
             opacity: hasSel ? 1 : 0,
             overflow: "hidden",
-            transition: "max-height .25s ease, opacity .2s ease, padding .2s ease",
+            transition:
+              "max-height .25s ease, opacity .2s ease, padding .2s ease",
           }}
         >
           <div className="muted" style={{ marginBottom: 6 }}>
