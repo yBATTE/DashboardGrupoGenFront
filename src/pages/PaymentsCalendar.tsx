@@ -72,6 +72,36 @@ function endOfDayLocal(d: string) {
   return new Date(y, m - 1, day, 23, 59, 59, 999);
 }
 
+/* ===== Loader overlay ===== */
+function PageLoader({ visible, text = "Cargando…" }: { visible: boolean; text?: string }) {
+  if (!visible) return null;
+  return (
+    <div
+      aria-busy="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(255,255,255,.85)",
+        backdropFilter: "blur(2px)",
+        zIndex: 9999,
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <div style={{ display: "grid", gap: 12, placeItems: "center" }}>
+        <svg width="48" height="48" viewBox="0 0 24 24" role="img" aria-label="cargando">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.15" />
+          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" fill="none">
+            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+          </path>
+        </svg>
+        <div style={{ fontWeight: 800 }}>{text}</div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>Preparando calendario y lista de pagos…</div>
+      </div>
+    </div>
+  );
+}
+
 /* ===== Helpers de exportación (XLSX/CSV) ===== */
 function fmtDate(iso?: string | null) {
   return iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "";
@@ -252,13 +282,20 @@ export default function PaymentsCalendar() {
   const monthEnd = useMemo(() => endOfMonth(viewDate), [viewDate]);
 
   // pagos del mes
-  const { data, isLoading, isError, refetch } = useQuery({
+  const {
+    data: payments,
+    isLoading: loadingPayments,
+    isError: errorPayments,
+    refetch,
+    isFetching: fetchingPayments,
+  } = useQuery<Payment[]>({
     queryKey: ["payments", monthStart.toISOString(), monthEnd.toISOString()],
     queryFn: () =>
       listPayments({
         from: monthStart.toISOString(),
         to: monthEnd.toISOString(),
       }),
+    staleTime: 10_000,
   });
 
   // equipos (picker)
@@ -269,12 +306,20 @@ export default function PaymentsCalendar() {
   } = useQuery<Team[]>({
     queryKey: ["teams"],
     queryFn: () => listTeams(),
+    staleTime: 60_000,
   });
 
   // ===== Usuario actual (rol) =====
   type Me = { _id: string; name?: string; lastName?: string; email: string; roles?: string[] };
-  const { data: me } = useQuery<Me>({ queryKey: ["me"], queryFn: getMe });
+  const { data: me, isLoading: loadingMe } = useQuery<Me>({
+    queryKey: ["me"],
+    queryFn: getMe,
+    staleTime: 60_000,
+  });
   const isAdmin = !!me?.roles?.some((r) => String(r).toLowerCase() === "admin");
+
+  // Loader overlay visible en primera carga
+  const bigLoaderVisible = (loadingPayments || loadingTeams || loadingMe) && !payments;
 
   /* ===== Filtros ===== */
   const [teamsSelected, setTeamsSelected] = useState<Team[]>([]);
@@ -289,7 +334,7 @@ export default function PaymentsCalendar() {
 
   // aplicar filtros base
   const baseFiltered = useMemo(() => {
-    let rows = (data ?? []) as Payment[];
+    let rows = (payments ?? []) as Payment[];
 
     const hasUser = (p: any, userId: string) => {
       const arr = Array.isArray(p.assigneeIds) ? p.assigneeIds : [];
@@ -309,7 +354,7 @@ export default function PaymentsCalendar() {
       rows = rows.filter((p) => tids.some((tid) => hasTeam(p, tid)));
     }
     return rows;
-  }, [data, usersSelected, teamsSelected]);
+  }, [payments, usersSelected, teamsSelected]);
 
   /* ===== Toggle global (impacta Calendario + Lista) ===== */
   const [dateMode, setDateMode] = useState<"due" | "paid">("due");
@@ -476,34 +521,26 @@ export default function PaymentsCalendar() {
       title="Pagos"
       actions={
         <div className="btn-row">
-          {/* Menú: Excel por mes (todos ven descargas; "ver online" solo admin) */}
+          {/* Menú: Excel por mes */}
           <Dropdown label="📊 Excel por mes">
             {isAdmin && (
               <DropdownItem href={SHEET_URL} newTab>
                 🔗 Ver online
               </DropdownItem>
             )}
-            <DropdownItem onClick={() => exportMonth("xlsx")}>
-              ⬇️ Descargar .xlsx
-            </DropdownItem>
-            <DropdownItem onClick={() => exportMonth("csv")}>
-              ⬇️ Descargar .csv
-            </DropdownItem>
+            <DropdownItem onClick={() => exportMonth("xlsx")}>⬇️ Descargar .xlsx</DropdownItem>
+            <DropdownItem onClick={() => exportMonth("csv")}>⬇️ Descargar .csv</DropdownItem>
           </Dropdown>
 
-          {/* Menú: Excel por día (todos ven descargas; "ver online" solo admin) */}
+          {/* Menú: Excel por día */}
           <Dropdown label="📅 Excel por día">
             {isAdmin && (
               <DropdownItem href={SHEET_URL_DAY} newTab>
                 🔗 Ver online
               </DropdownItem>
             )}
-            <DropdownItem onClick={() => exportDay("xlsx")}>
-              ⬇️ Descargar .xlsx (día)
-            </DropdownItem>
-            <DropdownItem onClick={() => exportDay("csv")}>
-              ⬇️ Descargar .csv (día)
-            </DropdownItem>
+            <DropdownItem onClick={() => exportDay("xlsx")}>⬇️ Descargar .xlsx (día)</DropdownItem>
+            <DropdownItem onClick={() => exportDay("csv")}>⬇️ Descargar .csv (día)</DropdownItem>
           </Dropdown>
 
           <Link to="/new/payments" className="btn btn-primary">
@@ -512,8 +549,10 @@ export default function PaymentsCalendar() {
         </div>
       }
     >
-      {isLoading && <div className="card">Cargando…</div>}
-      {isError && (
+      {/* Overlay inicial */}
+      <PageLoader visible={bigLoaderVisible} />
+
+      {errorPayments && (
         <div className="card" style={{ borderColor: "var(--danger)", background: "#fff4f4" }}>
           Error.{" "}
           <button className="btn btn-ghost" onClick={() => refetch()}>
@@ -523,7 +562,7 @@ export default function PaymentsCalendar() {
       )}
 
       {/* ===== Calendario + Toggle arriba ===== */}
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card" style={{ padding: 0, opacity: bigLoaderVisible ? 0.35 : 1 }}>
         <div
           style={{
             padding: "12px 14px",
@@ -540,6 +579,11 @@ export default function PaymentsCalendar() {
             <span className="muted" style={{ marginLeft: 8 }}>
               — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido · amarillo: pagado
             </span>
+            {fetchingPayments && (
+              <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+                (actualizando…)
+              </span>
+            )}
           </div>
 
           {/* Toggle por encima del calendario */}
@@ -656,7 +700,7 @@ export default function PaymentsCalendar() {
       </div>
 
       {/* ===== Filtros ===== */}
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card" style={{ marginTop: 12, opacity: bigLoaderVisible ? 0.35 : 1 }}>
         <div className="card-sub" style={{ marginBottom: 8 }}>
           Filtros (afectan al calendario y a la lista)
         </div>
@@ -730,6 +774,7 @@ export default function PaymentsCalendar() {
           marginTop: 14,
           flexWrap: "wrap",
           gap: 10,
+          opacity: bigLoaderVisible ? 0.35 : 1,
         }}
       >
         <h2 className="h2" style={{ margin: 0 }}>
@@ -766,11 +811,11 @@ export default function PaymentsCalendar() {
 
       {/* ===== Lista ===== */}
       {!monthList.length ? (
-        <div className="card" style={{ marginTop: 8 }}>
+        <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
           No hay pagos con los filtros actuales.
         </div>
       ) : (
-        <div className="card" style={{ padding: 0, marginTop: 8 }}>
+        <div className="card" style={{ padding: 0, marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
           <div
             style={{
               display: "grid",
@@ -916,7 +961,7 @@ export default function PaymentsCalendar() {
       {/* ===== Modales ===== */}
       {openTeams && (
         <TeamPickerModal
-          teams={teamsData ?? []}
+          teams={(teamsData ?? []) as Team[]}
           initiallySelected={teamsSelected}
           onClose={() => setOpenTeams(false)}
           onSave={(sel) => {
@@ -1151,9 +1196,10 @@ function UserPickerModal({
     () => Object.fromEntries(initiallySelected.map((u) => [u._id, u]))
   );
 
-  const { data: results, isLoading } = useQuery({
+  const { data: results, isLoading } = useQuery<BasicUser[]>({
     queryKey: ["userSearch", dq],
     queryFn: () => searchUsers(dq),
+    staleTime: 10_000,
   });
 
   useEffect(() => {
