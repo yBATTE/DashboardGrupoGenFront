@@ -313,3 +313,25 @@ a.btn, a.btn-ghost, a.no-underline{
   cursor: pointer;
 }
 .sidebar .brand:hover{ opacity: .9; }
+
+/* Tema visual para react-big-calendar */
+.rbc-theme-gen .rbc-toolbar { display: none; }
+.rbc-theme-gen .rbc-month-view,
+.rbc-theme-gen .rbc-time-view,
+.rbc-theme-gen .rbc-agenda-view {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.rbc-theme-gen .rbc-month-header { background: var(--bg-soft, #fafafa); }
+.rbc-theme-gen .rbc-header {
+  padding: 10px 8px;
+  font-weight: 800;
+  color: #374151;
+  border-bottom: 1px solid var(--border);
+}
+.rbc-theme-gen .rbc-month-row + .rbc-month-row { border-top: 1px solid var(--border); }
+.rbc-theme-gen .rbc-date-cell { padding: 6px 8px; font-weight: 700; color: #6b7280; }
+.rbc-theme-gen .rbc-day-bg { transition: background .15s ease; }
+.rbc-theme-gen .rbc-day-bg:hover { background: rgba(0,0,0,.03); }
+.rbc-theme-gen .rbc-event { padding: 0; background: transparent; border: none; box-shadow: none; }

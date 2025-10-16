@@ -4,7 +4,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Layout from "../components/Layout";
 
-import { Calendar, dateFnsLocalizer, Views } from "react-big-calendar";
+import { Calendar, dateFnsLocalizer, EventProps, ToolbarProps, View, Views } from "react-big-calendar";
 import {
   format as fmt,
   parse,
@@ -41,6 +41,115 @@ const SHEET_URL =
   "https://docs.google.com/spreadsheets/d/1ffaM03ZDztLaMM0odRh9fS4-Yx9lpcog8r_a0uBaIqY/edit?gid=1012738625";
 const SHEET_URL_DAY =
   "https://docs.google.com/spreadsheets/d/1ed4LzPSEmPPpQBgCkizcrZT1pSWTrO2XTSfL0VIf7Dc/edit?gid=0";
+
+/* ========= THEME: Toolbar & Event ========= */
+
+const ModernToolbar: React.FC<ToolbarProps<CalendarEvent, object>> = ({
+  label,
+  onNavigate,
+  onView,
+  view,
+}) => {
+  const Btn = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button
+      {...props}
+      className="btn btn-ghost"
+      style={{
+        border: "1px solid var(--border)",
+        padding: "6px 10px",
+        borderRadius: 10,
+        fontWeight: 700,
+      }}
+    />
+  );
+
+  const SegBtn = ({
+    active,
+    children,
+    onClick,
+  }: {
+    active?: boolean;
+    children: React.ReactNode;
+    onClick?: () => void;
+  }) => (
+    <button
+      onClick={onClick}
+      className="btn btn-ghost"
+      style={{
+        padding: "6px 10px",
+        fontWeight: active ? 800 : 600,
+        background: active ? "var(--bg-soft)" : "transparent",
+      }}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div
+      style={{
+        padding: 12,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={() => onNavigate("TODAY" as any)}>Hoy</Btn>
+        <Btn onClick={() => onNavigate("PREV" as any)}>←</Btn>
+        <Btn onClick={() => onNavigate("NEXT" as any)}>→</Btn>
+      </div>
+
+      <div style={{ fontWeight: 900, fontSize: 18 }}>{label}</div>
+
+      <div
+        style={{
+          display: "inline-flex",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+        <SegBtn active={view === "month"} onClick={() => onView("month" as View)}>
+          Mes
+        </SegBtn>
+        <SegBtn active={view === "week"} onClick={() => onView("week" as View)}>
+          Semana
+        </SegBtn>
+        <SegBtn active={view === "day"} onClick={() => onView("day" as View)}>
+          Día
+        </SegBtn>
+      </div>
+    </div>
+  );
+};
+
+
+/** “Tarjeta” de evento */
+const EventPill: React.FC<EventProps<CalendarEvent>> = ({ event }) => {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "4px 8px",
+        borderRadius: 999,
+        fontWeight: 800,
+        boxShadow: "0 2px 8px rgba(0,0,0,.06)",
+        border: "1px dashed rgba(0,0,0,.15)",
+      }}
+      title={event?.payment?.description || event?.title}
+    >
+      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {event.title}
+      </span>
+    </div>
+  );
+};
+
 
 /* ===== Utils ===== */
 function fullName(u: any): string {
@@ -92,7 +201,14 @@ function PageLoader({ visible, text = "Cargando…" }: { visible: boolean; text?
         <svg width="48" height="48" viewBox="0 0 24 24" role="img" aria-label="cargando">
           <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.15" />
           <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" fill="none">
-            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 12 12"
+              to="360 12 12"
+              dur="0.8s"
+              repeatCount="indefinite"
+            />
           </path>
         </svg>
         <div style={{ fontWeight: 800 }}>{text}</div>
@@ -507,8 +623,24 @@ export default function PaymentsCalendar() {
 
   const exportDay = useCallback(
     (format: "xlsx" | "csv" = "xlsx") => {
-      const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 0, 0, 0, 0);
-      const end = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 23, 59, 59, 999);
+      const start = new Date(
+        viewDate.getFullYear(),
+        viewDate.getMonth(),
+        viewDate.getDate(),
+        0,
+        0,
+        0,
+        0
+      );
+      const end = new Date(
+        viewDate.getFullYear(),
+        viewDate.getMonth(),
+        viewDate.getDate(),
+        23,
+        59,
+        59,
+        999
+      );
       const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: start, rangeEnd: end });
       const base = `${fileBaseName}_${fmt(viewDate, "yyyy-MM-dd")}`;
       downloadRows(rows, base, format);
@@ -640,6 +772,8 @@ export default function PaymentsCalendar() {
               onSelectEvent={onSelectEvent}
               onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
+              components={{ toolbar: ModernToolbar, event: EventPill }}
+              className="rbc-theme-gen"
               toolbar
               popup
               min={minTime}
@@ -674,6 +808,8 @@ export default function PaymentsCalendar() {
               onSelectEvent={onSelectEvent}
               onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
+              components={{ toolbar: ModernToolbar, event: EventPill }}
+              className="rbc-theme-gen"
               toolbar
               popup
               min={minTime}
@@ -957,7 +1093,6 @@ export default function PaymentsCalendar() {
           </ul>
         </div>
       )}
-
       {/* ===== Modales ===== */}
       {openTeams && (
         <TeamPickerModal
