@@ -1,5 +1,5 @@
 // apps/web/src/pages/PaymentsCalendar.tsx
-import { useMemo, useCallback, useState, useEffect } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Layout from "../components/Layout";
@@ -20,9 +20,11 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 
+import * as XLSX from "xlsx";
+
 import { listPayments, Payment } from "../api/payments";
 import { listTeams, Team } from "../api/teams";
-import { searchUsers, BasicUser } from "../api/users";
+import { searchUsers, BasicUser, getMe } from "../api/users";
 
 /* ===== Localizer (ES) ===== */
 const locales = { es };
@@ -33,6 +35,12 @@ const localizer = dateFnsLocalizer({
   getDay,
   locales,
 });
+
+/* ===== URLs de Google Sheets (para admins) ===== */
+const SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/1ffaM03ZDztLaMM0odRh9fS4-Yx9lpcog8r_a0uBaIqY/edit?gid=1012738625";
+const SHEET_URL_DAY =
+  "https://docs.google.com/spreadsheets/d/1ed4LzPSEmPPpQBgCkizcrZT1pSWTrO2XTSfL0VIf7Dc/edit?gid=0";
 
 /* ===== Utils ===== */
 function fullName(u: any): string {
@@ -64,10 +72,61 @@ function endOfDayLocal(d: string) {
   return new Date(y, m - 1, day, 23, 59, 59, 999);
 }
 
-const SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/1ffaM03ZDztLaMM0odRh9fS4-Yx9lpcog8r_a0uBaIqY/edit?gid=1012738625";
-const SHEET_URL_DAY =
-  "https://docs.google.com/spreadsheets/d/1ed4LzPSEmPPpQBgCkizcrZT1pSWTrO2XTSfL0VIf7Dc/edit?hl=es&gid=0#gid=0";
+/* ===== Helpers de exportación (XLSX/CSV) ===== */
+function fmtDate(iso?: string | null) {
+  return iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "";
+}
+
+function buildExportRows(
+  payments: Payment[],
+  {
+    dateMode,
+    rangeStart,
+    rangeEnd,
+  }: { dateMode: "due" | "paid"; rangeStart: Date; rangeEnd: Date }
+) {
+  const start = rangeStart.getTime();
+  const end = rangeEnd.getTime();
+
+  return payments
+    .filter((p) => {
+      const ref = dateMode === "paid" ? p.paidAt : p.dueAt;
+      if (!ref) return false;
+      const t = new Date(ref).getTime();
+      return t >= start && t <= end;
+    })
+    .map((p) => {
+      const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
+      return {
+        Título: p.title ?? "",
+        MontoARS: p.amount ?? 0,
+        Estado: p.status ?? "",
+        [dateMode === "paid" ? "Pagado" : "Vencimiento"]: fmtDate(refDate),
+        "Creado por": displayUser(p.createdBy),
+        "Creado el": fmtDate((p as any)?.createdAt),
+        "Pagado por": p.status === "paid" ? displayUser(p.paidBy) : "",
+        "Pagado el": p.status === "paid" ? fmtDate(p.paidAt) : "",
+        Equipos: (p.teamIds ?? [])
+          .map((t: any) => (typeof t === "string" ? t : t?.name ?? t?._id ?? ""))
+          .join(", "),
+        Asignados: (p.assigneeIds ?? [])
+          .map((u: any) => (typeof u === "string" ? u : fullName(u)))
+          .join(", "),
+        Descripción: p.description ?? "",
+        Id: p._id,
+      };
+    });
+}
+
+function downloadRows(rows: any[], filenameBase: string, format: "xlsx" | "csv" = "xlsx") {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Pagos");
+
+  const ext = format === "csv" ? "csv" : "xlsx";
+  const bookType = format === "csv" ? "csv" : "xlsx";
+  XLSX.writeFile(wb, `${filenameBase}.${ext}`, { bookType });
+}
 
 type CalendarEvent = {
   id: string;
@@ -76,6 +135,112 @@ type CalendarEvent = {
   end: Date;
   payment: Payment;
 };
+
+/* ===== Dropdown simple ===== */
+function Dropdown({
+  label,
+  children,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        className="btn btn-outline"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            minWidth: 220,
+            background: "var(--bg, #fff)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            marginTop: 6,
+            boxShadow: "0 8px 24px rgba(0,0,0,.12)",
+            zIndex: 100,
+            overflow: "hidden",
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropdownItem({
+  onClick,
+  href,
+  newTab,
+  children,
+  danger = false,
+}: {
+  onClick?: () => void;
+  href?: string;
+  newTab?: boolean;
+  children: React.ReactNode;
+  danger?: boolean;
+}) {
+  const style: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 12px",
+    fontSize: 14,
+    cursor: "pointer",
+    borderBottom: "1px solid var(--border)",
+    color: danger ? "#b91c1c" : "inherit",
+  };
+  const inner = (
+    <div
+      style={style}
+      onClick={onClick}
+      role="menuitem"
+      onKeyDown={(e) => {
+        if (onClick && (e.key === "Enter" || e.key === " ")) onClick();
+      }}
+      tabIndex={0}
+    >
+      {children}
+    </div>
+  );
+  if (href) {
+    return (
+      <a
+        href={href}
+        target={newTab ? "_blank" : undefined}
+        rel={newTab ? "noopener noreferrer" : undefined}
+        style={{ textDecoration: "none", color: "inherit" }}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return inner;
+}
 
 /* ===== Página ===== */
 export default function PaymentsCalendar() {
@@ -101,10 +266,15 @@ export default function PaymentsCalendar() {
     data: teamsData,
     isLoading: loadingTeams,
     isError: errTeams,
-  } = useQuery({
+  } = useQuery<Team[]>({
     queryKey: ["teams"],
-    queryFn: listTeams,
+    queryFn: () => listTeams(),
   });
+
+  // ===== Usuario actual (rol) =====
+  type Me = { _id: string; name?: string; lastName?: string; email: string; roles?: string[] };
+  const { data: me } = useQuery<Me>({ queryKey: ["me"], queryFn: getMe });
+  const isAdmin = !!me?.roles?.some((r) => String(r).toLowerCase() === "admin");
 
   /* ===== Filtros ===== */
   const [teamsSelected, setTeamsSelected] = useState<Team[]>([]);
@@ -142,10 +312,9 @@ export default function PaymentsCalendar() {
   }, [data, usersSelected, teamsSelected]);
 
   /* ===== Toggle global (impacta Calendario + Lista) ===== */
-  // "due" = vencimiento (dueAt)  |  "paid" = pagado (paidAt)
   const [dateMode, setDateMode] = useState<"due" | "paid">("due");
 
-  /* ===== Eventos para ambos modos ===== */
+  /* ===== Eventos ===== */
   const eventsDue: CalendarEvent[] = useMemo(() => {
     const rows = baseFiltered.filter((p) => p.dueAt);
     return rows.map((p) => {
@@ -203,20 +372,11 @@ export default function PaymentsCalendar() {
 
   const onSelectEvent = useCallback((e: CalendarEvent) => nav(`/payments/${e.id}`), [nav]);
   const onNavigate = useCallback((date: Date) => setViewDate(date), []);
-  const minTime = useMemo(
-    () => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0),
-    []
-  );
-  const maxTime = useMemo(
-    () => setSeconds(setMinutes(setHours(new Date(), 18), 0), 0),
-    []
-  );
-  const scrollTo = useMemo(
-    () => setSeconds(setMinutes(setHours(new Date(), 8), 0), 0),
-    []
-  );
+  const minTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0), []);
+  const maxTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 18), 0), 0), []);
+  const scrollTo = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 8), 0), 0), []);
 
-  /* ===== Controles de LISTA ===== */
+  /* ===== Lista ===== */
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   const clearRange = () => {
@@ -246,18 +406,14 @@ export default function PaymentsCalendar() {
 
     const rows = (baseFiltered ?? [])
       .filter((p) => {
-        const selectedDate =
-          dateMode === "paid" ? (p.paidAt ?? null) : (p.dueAt ?? null);
-
+        const selectedDate = dateMode === "paid" ? (p.paidAt ?? null) : (p.dueAt ?? null);
         if (dateMode === "paid") {
           if (p.status !== "paid" || !selectedDate) return false;
         } else {
           if (!selectedDate) return false;
         }
-
         const t = new Date(selectedDate!).getTime();
         if (t < rangeStart || t > rangeEnd) return false;
-
         if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
         return true;
       })
@@ -283,29 +439,73 @@ export default function PaymentsCalendar() {
 
   const dateHeaderLabel = dateMode === "paid" ? "Pagado" : "Vencimiento";
 
+  /* ===== Exportadores ===== */
+  const fileBaseName = useMemo(
+    () =>
+      `Pagos_${fmt(monthStart, "yyyy-MM", { locale: es })}_${
+        dateMode === "paid" ? "pagados" : "vencimiento"
+      }`,
+    [monthStart, dateMode]
+  );
+
+  const exportMonth = useCallback(
+    (format: "xlsx" | "csv" = "xlsx") => {
+      const rows = buildExportRows(baseFiltered, {
+        dateMode,
+        rangeStart: monthStart,
+        rangeEnd: monthEnd,
+      });
+      downloadRows(rows, fileBaseName, format);
+    },
+    [baseFiltered, dateMode, monthStart, monthEnd, fileBaseName]
+  );
+
+  const exportDay = useCallback(
+    (format: "xlsx" | "csv" = "xlsx") => {
+      const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 0, 0, 0, 0);
+      const end = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 23, 59, 59, 999);
+      const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: start, rangeEnd: end });
+      const base = `${fileBaseName}_${fmt(viewDate, "yyyy-MM-dd")}`;
+      downloadRows(rows, base, format);
+    },
+    [baseFiltered, dateMode, viewDate, fileBaseName]
+  );
+
   return (
     <Layout
       title="Pagos"
       actions={
         <div className="btn-row">
-          <a
-            href={SHEET_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-outline"
-            title="Abrir Excel de pagos"
-          >
-            📊 Ver Excel por mes
-          </a>
-          <a
-            href={SHEET_URL_DAY}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-outline"
-            title="Abrir Excel de pagos"
-          >
-            📊 Ver Excel por día
-          </a>
+          {/* Menú: Excel por mes (todos ven descargas; "ver online" solo admin) */}
+          <Dropdown label="📊 Excel por mes">
+            {isAdmin && (
+              <DropdownItem href={SHEET_URL} newTab>
+                🔗 Ver online
+              </DropdownItem>
+            )}
+            <DropdownItem onClick={() => exportMonth("xlsx")}>
+              ⬇️ Descargar .xlsx
+            </DropdownItem>
+            <DropdownItem onClick={() => exportMonth("csv")}>
+              ⬇️ Descargar .csv
+            </DropdownItem>
+          </Dropdown>
+
+          {/* Menú: Excel por día (todos ven descargas; "ver online" solo admin) */}
+          <Dropdown label="📅 Excel por día">
+            {isAdmin && (
+              <DropdownItem href={SHEET_URL_DAY} newTab>
+                🔗 Ver online
+              </DropdownItem>
+            )}
+            <DropdownItem onClick={() => exportDay("xlsx")}>
+              ⬇️ Descargar .xlsx (día)
+            </DropdownItem>
+            <DropdownItem onClick={() => exportDay("csv")}>
+              ⬇️ Descargar .csv (día)
+            </DropdownItem>
+          </Dropdown>
+
           <Link to="/new/payments" className="btn btn-primary">
             + Crear pago
           </Link>
@@ -381,7 +581,7 @@ export default function PaymentsCalendar() {
           </div>
         </div>
 
-        {/* Dos calendarios: render condicional para forzar re-mount y refrescar fechas */}
+        {/* Calendarios */}
         <div style={{ height: 600 }}>
           {dateMode === "due" ? (
             <Calendar
@@ -394,7 +594,7 @@ export default function PaymentsCalendar() {
               startAccessor="start"
               endAccessor="end"
               onSelectEvent={onSelectEvent}
-              onNavigate={onNavigate}
+              onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
               toolbar
               popup
@@ -428,7 +628,7 @@ export default function PaymentsCalendar() {
               startAccessor="start"
               endAccessor="end"
               onSelectEvent={onSelectEvent}
-              onNavigate={onNavigate}
+              onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
               toolbar
               popup
@@ -599,7 +799,7 @@ export default function PaymentsCalendar() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={toggleDueSort}
+                onClick={() => setSortDue((p) => (p === "asc" ? "desc" : "asc"))}
                 title={`Ordenar por ${dateHeaderLabel.toLowerCase()}`}
                 style={{ padding: "2px 6px", fontSize: 12 }}
               >
@@ -612,7 +812,7 @@ export default function PaymentsCalendar() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={toggleUnpaidFirst}
+                onClick={() => setSortUnpaidFirst((p) => !p)}
                 title="Pendientes primero"
                 style={{
                   padding: "2px 6px",
