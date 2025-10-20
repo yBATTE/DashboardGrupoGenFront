@@ -13,7 +13,13 @@ const fmtARS = (n: number) =>
 // SIEMPRE prioriza displayName; si no, arma "name lastName"; luego email/_id
 function userLabel(
   u:
-    | { name?: string; lastName?: string; displayName?: string; email?: string; _id?: string }
+    | {
+        name?: string;
+        lastName?: string;
+        displayName?: string;
+        email?: string;
+        _id?: string;
+      }
     | null
     | undefined
 ) {
@@ -38,6 +44,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // - {user: {...}}
 function normalizeUserRef(ref: any): { userObj?: any; id?: string } {
   if (!ref) return {};
+
   // wrapper { user: {...} }
   if (typeof ref === "object" && ref.user) {
     const u = ref.user;
@@ -53,6 +60,7 @@ function normalizeUserRef(ref: any): { userObj?: any; id?: string } {
       };
     if (u && u._id) return { id: String(u._id) };
   }
+
   // objeto con datos
   if (typeof ref === "object") {
     if (ref.name || ref.email || ref.displayName || ref.lastName)
@@ -67,8 +75,10 @@ function normalizeUserRef(ref: any): { userObj?: any; id?: string } {
       };
     if (ref._id) return { id: String(ref._id) };
   }
+
   // string id
   if (typeof ref === "string") return { id: ref };
+
   return {};
 }
 
@@ -88,20 +98,14 @@ export default function PaymentDetail() {
   });
 
   // ===== Usuarios asignados ===================================================
-  const rawAssignees: any[] =
-    ((payment as any)?.assigneeIds ??
-      (payment as any)?.assignees ??
-      []) as any[];
-
+  const rawAssignees: any[] = ((payment as any)?.assigneeIds ?? (payment as any)?.assignees ?? []) as any[];
   const normUsers = rawAssignees.map(normalizeUserRef);
 
   const populatedAssignees = normUsers
     .map((n) => n.userObj)
     .filter(Boolean) as Array<{ _id: string; name?: string; lastName?: string; displayName?: string; email?: string }>;
 
-  const missingUserIds = normUsers
-    .map((n) => n.id)
-    .filter(Boolean) as string[];
+  const missingUserIds = normUsers.map((n) => n.id).filter(Boolean) as string[];
 
   const usersQueries = useQueries({
     queries: missingUserIds.map((uid) => ({
@@ -113,6 +117,7 @@ export default function PaymentDetail() {
   });
 
   const usersLoading = usersQueries.some((q) => q.isLoading);
+
   const fetchedAssignees = usersQueries
     .map((q) => q.data)
     .filter(Boolean) as Array<{ _id: string; name?: string; lastName?: string; displayName?: string; email?: string }>;
@@ -136,9 +141,7 @@ export default function PaymentDetail() {
       })),
     }));
 
-  const missingTeamIds = rawTeams
-    .filter((t) => typeof t === "string")
-    .map((t) => String(t));
+  const missingTeamIds = rawTeams.filter((t) => typeof t === "string").map((t) => String(t));
 
   const { data: teamsFull } = useQuery({
     queryKey: ["teams-full-for-payment", missingTeamIds.join(",")],
@@ -180,6 +183,7 @@ export default function PaymentDetail() {
     if (!confirm(`¿Marcar "${payment.title}" como pagado?`)) return;
     payMut.mutate();
   };
+
   const onReopen = () => {
     if (!payment) return;
     if (!confirm(`¿Reabrir el pago "${payment.title}"?`)) return;
@@ -197,6 +201,7 @@ export default function PaymentDetail() {
       }
     >
       {isLoading && <div className="card">Cargando…</div>}
+
       {isError && (
         <div className="card" style={{ borderColor: "var(--danger)", background: "#fff4f4" }}>
           No se pudo cargar el pago.{" "}
@@ -211,7 +216,9 @@ export default function PaymentDetail() {
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
             <div>
-              <h1 className="h1" style={{ margin: 0 }}>{payment.title}</h1>
+              <h1 className="h1" style={{ margin: 0 }}>
+                {payment.title}
+              </h1>
               <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                 Estado: <b>{payment.status === "paid" ? "Pagado" : "Pendiente"}</b>
               </div>
@@ -223,10 +230,7 @@ export default function PaymentDetail() {
 
           {/* Info principal */}
           <div className="grid grid-2" style={{ marginTop: 16 }}>
-            <Field label="Vencimiento">
-              {payment.dueAt ? new Date(payment.dueAt).toLocaleString() : "—"}
-            </Field>
-
+            <Field label="Vencimiento">{payment.dueAt ? new Date(payment.dueAt).toLocaleString() : "—"}</Field>
             <Field label="Monto">{fmtARS(payment.amount)}</Field>
 
             <Field label="Creado por">
@@ -246,45 +250,33 @@ export default function PaymentDetail() {
               )}
             </Field>
 
-            {/* ===== Asignado a ===== */}
+            {/* ===== Asignado a (Usuarios) ===== */}
             <Field label="Asignado a">
               {usersLoading && <span className="muted">Cargando asignados…</span>}
-
-              {!usersLoading && !assignees.length && !teams.length && <span className="muted">—</span>}
-
-              {/* Usuarios */}
+              {!usersLoading && !assignees.length && <span className="muted">—</span>}
               {!usersLoading && assignees.length > 0 && (
-                <div style={{ marginBottom: teams.length ? 10 : 0 }}>
-                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                    Usuarios
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {assignees.map((u) => (
-                      <span key={u._id} className="badge">{userLabel(u)}</span>
-                    ))}
-                  </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {assignees.map((u) => (
+                    <span key={u._id} className="badge">
+                      {userLabel(u)}
+                    </span>
+                  ))}
                 </div>
               )}
+            </Field>
 
-              {/* Equipos */}
-              {teams.length > 0 && (
-                <div>
-                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                    Equipos
-                  </div>
-                  <div className="stack-sm">
-                    {teams.map((t) => (
-                      <div key={t._id} style={{ lineHeight: 1.35 }}>
-                        <div style={{ fontWeight: 800 }}>{t.name}</div>
-                        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                          {t.members?.length
-                            ? t.members.map((m: any) => userLabel(m)).join(", ")
-                            : "—"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            {/* ===== Equipos (chips como en TaskDetail) ===== */}
+            <Field label="Equipos">
+              {teams.length ? (
+                <div className="chips" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {teams.map((t) => (
+                    <span key={String(t._id)} className="chip" title={t.name}>
+                      {t.name}
+                    </span>
+                  ))}
                 </div>
+              ) : (
+                <span className="muted">—</span>
               )}
             </Field>
 
@@ -310,7 +302,9 @@ export default function PaymentDetail() {
                 {reopenMut.isPending ? "Reabriendo…" : "Reabrir pago"}
               </button>
             )}
-            <Link to="/payments" className="btn btn-ghost">Volver</Link>
+            <Link to="/payments" className="btn btn-ghost">
+              Volver
+            </Link>
           </div>
         </div>
       )}
