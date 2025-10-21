@@ -156,6 +156,10 @@ function buildExportRows(
   const start = rangeStart.getTime();
   const end = rangeEnd.getTime();
 
+  const toEsStatus = (s?: string) => (s === "paid" ? "Pagado" : "Pendiente");
+  const fmtD = (d?: string | Date | null) =>
+    d ? fmt(new Date(d), "dd/MM/yyyy HH:mm", { locale: es }) : "";
+
   return payments
     .filter((p) => {
       const ref = dateMode === "paid" ? p.paidAt : p.dueAt;
@@ -167,22 +171,17 @@ function buildExportRows(
       const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
       return {
         Título: p.title ?? "",
-        MontoARS: p.amount ?? 0,
-        Estado: p.status ?? "",
-        [dateMode === "paid" ? "Pagado" : "Vencimiento"]: fmtDate(refDate),
+        MontoARS: Number(p.amount ?? 0),
+        Estado: toEsStatus(p.status),
+        [dateMode === "paid" ? "Pagado" : "Vencimiento"]: fmtD(refDate),
         "Creado por": displayUser(p.createdBy),
-        "Creado el": fmtDate((p as any)?.createdAt),
+        "Creado el": fmtD((p as any)?.createdAt),
         "Pagado por": p.status === "paid" ? displayUser(p.paidBy) : "",
-        "Pagado el": p.status === "paid" ? fmtDate(p.paidAt) : "",
-        Equipos: (p.teamIds ?? [])
-          .map((t: any) =>
-            typeof t === "string" ? t : t?.name ?? t?._id ?? ""
-          )
-          .join(", "),
-        Asignados: (p.assigneeIds ?? [])
-          .map((u: any) => (typeof u === "string" ? u : fullName(u)))
-          .join(", "),
-        Descripción: p.description ?? "",
+        "Pagado el": p.status === "paid" ? fmtD(p.paidAt) : "",
+        // ❌ Eliminados:
+        // Equipos: ...
+        // Asignados: ...
+        Descripción: (p as any)?.description ?? "",
         Id: p._id,
       };
     });
