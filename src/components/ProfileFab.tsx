@@ -25,7 +25,6 @@ export default function ProfileFab() {
 
   const displayName =
     [first, last].filter(Boolean).join(" ") || email || "Usuario";
-  const letter = (displayName || "U").slice(0, 1).toUpperCase();
 
   return (
     <>
@@ -64,10 +63,9 @@ export default function ProfileFab() {
             background: "#eef2ff",
             boxShadow: "0 6px 16px rgba(79,70,229,.22)",
             flex: "0 0 auto",
-            padding: 4, // opcional: espacio interno para el SVG redondo
+            padding: 4,
           }}
           onError={(e) => {
-            // fallback visual si el asset no existe
             (e.currentTarget as HTMLImageElement).style.display = "none";
           }}
         />
@@ -90,10 +88,6 @@ export default function ProfileFab() {
     </>
   );
 }
-
-/** Modal con 2 pestañas: Datos (nombre/email) y Contraseña */
-
-/** ...tu ProfileFab() queda igual... */
 
 /** Modal con 2 pestañas: Datos (nombre/email) y Contraseña */
 function ProfileModal({ onClose }: { onClose: () => void }) {
@@ -123,7 +117,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
     <div
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
+      /* 🔒 No cerrar al clickear overlay: sin onClick acá */
       style={{
         position: "fixed",
         inset: 0,
@@ -136,6 +130,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
     >
       <div
         className="card"
+        /* Igual mantenemos stopPropagation por si en el futuro se agrega un handler al overlay */
         onClick={(e) => e.stopPropagation()}
         style={{ maxWidth: 560, width: "100%" }}
       >
@@ -203,15 +198,16 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
 function EditAccountForm(
   { me, onSaved }: { me: { name?: string; lastName?: string; email: string }; onSaved: () => void }
 ) {
-  const [name, setName] = useState(me.name ?? '');
-  const [lastName, setLastName] = useState(me.lastName ?? ''); // 👈 nuevo
+  const [name, setName] = useState(me.name ?? "");
+  const [lastName, setLastName] = useState(me.lastName ?? "");
   const email = me.email;
   const [msg, setMsg] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: (payload: { name?: string; lastName?: string }) => updateMe(payload),
+    mutationFn: (payload: { name?: string; lastName?: string }) =>
+      updateMe(payload),
     onSuccess: (updated) => {
-      setMsg('Datos guardados.');
+      setMsg("Datos guardados.");
       try {
         const store: any = (useAuthStore as any).getState?.();
         store?.setUser?.(updated);
@@ -222,34 +218,71 @@ function EditAccountForm(
   });
 
   const canSave = useMemo(() => {
-    return (name ?? '').trim() !== (me.name ?? '') ||
-           (lastName ?? '').trim() !== (me.lastName ?? '');
+    return (name ?? "").trim() !== (me.name ?? "") ||
+      (lastName ?? "").trim() !== (me.lastName ?? "");
   }, [name, lastName, me]);
 
   return (
     <>
       <label className="label">Nombre</label>
-      <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="given-name" />
+      <input
+        className="input"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        autoComplete="given-name"
+      />
 
-      <label className="label" style={{ marginTop: 10 }}>Apellido</label>
-      <input className="input" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+      <label className="label" style={{ marginTop: 10 }}>
+        Apellido
+      </label>
+      <input
+        className="input"
+        value={lastName}
+        onChange={(e) => setLastName(e.target.value)}
+        autoComplete="family-name"
+      />
 
-      <label className="label" style={{ marginTop: 10 }}>Email</label>
-      <input className="input" value={email} readOnly disabled style={{ background:'#f9fafb', color:'#6b7280', cursor:'not-allowed' }} />
+      <label className="label" style={{ marginTop: 10 }}>
+        Email
+      </label>
+      <input
+        className="input"
+        value={email}
+        readOnly
+        disabled
+        style={{ background: "#f9fafb", color: "#6b7280", cursor: "not-allowed" }}
+      />
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
         El email no puede modificarse desde aquí. Contactá a un administrador para solicitar el cambio.
       </div>
 
       {mutation.error && (
-        <div className="card" style={{ marginTop: 10, background: '#fff4f4', borderColor: 'var(--danger)' }}>
-          {(mutation.error as any)?.response?.data?.message ?? 'No se pudieron guardar los datos.'}
+        <div
+          className="card"
+          style={{ marginTop: 10, background: "#fff4f4", borderColor: "var(--danger)" }}
+        >
+          {(mutation.error as any)?.response?.data?.message ??
+            "No se pudieron guardar los datos."}
         </div>
       )}
-      {msg && <div className="card" style={{ marginTop: 10, background: '#f0fff4', borderColor: '#22c55e' }}>{msg}</div>}
+      {msg && (
+        <div
+          className="card"
+          style={{ marginTop: 10, background: "#f0fff4", borderColor: "#22c55e" }}
+        >
+          {msg}
+        </div>
+      )}
 
       <div className="btn-row" style={{ marginTop: 14 }}>
-        <button className="btn btn-primary" onClick={() => mutation.mutate({ name: name.trim(), lastName: lastName.trim() })} disabled={!canSave || mutation.isPending}>
-          {mutation.isPending ? 'Guardando…' : 'Guardar cambios'}
+        <button
+          className="btn btn-primary"
+          onClick={() =>
+            mutation.mutate({ name: name.trim(), lastName: lastName.trim() })
+          }
+          disabled={!canSave || mutation.isPending}
+        >
+          {mutation.isPending ? "Guardando…" : "Guardar cambios"}
         </button>
       </div>
     </>
@@ -336,11 +369,7 @@ function ChangePasswordForm({ onChanged }: { onChanged: () => void }) {
       {msg && (
         <div
           className="card"
-          style={{
-            marginTop: 10,
-            background: "#f0fff4",
-            borderColor: "#22c55e",
-          }}
+          style={{ marginTop: 10, background: "#f0fff4", borderColor: "#22c55e" }}
         >
           {msg}
         </div>
