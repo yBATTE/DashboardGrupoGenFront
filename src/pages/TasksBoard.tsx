@@ -6,6 +6,7 @@ import { api } from '../api/axios'
 import Layout from '../components/Layout'
 
 import { Calendar, dateFnsLocalizer, Views } from 'react-big-calendar'
+import type { ToolbarProps, EventProps, View } from 'react-big-calendar'
 import {
   format,
   parse,
@@ -52,10 +53,148 @@ const localizer = dateFnsLocalizer({
   locales,
 })
 
+/* ===== Loader overlay (igual que PaymentsCalendar) ===== */
+function PageLoader({
+  visible,
+  text = 'Cargando…',
+}: {
+  visible: boolean
+  text?: string
+}) {
+  if (!visible) return null
+  return (
+    <div
+      aria-busy="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(255,255,255,.85)',
+        backdropFilter: 'blur(2px)',
+        zIndex: 9999,
+        display: 'grid',
+        placeItems: 'center',
+      }}
+    >
+      <div style={{ display: 'grid', gap: 12, placeItems: 'center' }}>
+        <svg width="48" height="48" viewBox="0 0 24 24" role="img" aria-label="cargando">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.15" />
+          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" fill="none">
+            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+          </path>
+        </svg>
+        <div style={{ fontWeight: 800 }}>{text}</div>
+        <div style={{ fontSize: 12, color: '#6b7280' }}>Preparando calendario y lista de tareas…</div>
+      </div>
+    </div>
+  )
+}
+
+/* ===== THEME: Toolbar & Event (estética moderna, sin cambiar lógica) ===== */
+const ModernToolbar: React.FC<ToolbarProps<any, object>> = ({
+  label,
+  onNavigate,
+  onView,
+  view,
+}) => {
+  const Btn = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button
+      {...props}
+      className="btn btn-ghost"
+      style={{
+        border: '1px solid var(--border)',
+        padding: '6px 10px',
+        borderRadius: 10,
+        fontWeight: 700,
+      }}
+    />
+  );
+
+  const SegBtn = ({
+    active,
+    children,
+    onClick,
+  }: {
+    active?: boolean;
+    children: React.ReactNode;
+    onClick?: () => void;
+  }) => (
+    <button
+      onClick={onClick}
+      className="btn btn-ghost"
+      style={{
+        padding: '6px 10px',
+        fontWeight: active ? 800 : 600,
+        background: active ? 'var(--bg-soft)' : 'transparent',
+      }}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div
+      style={{
+        padding: 12,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        borderBottom: '1px solid var(--border)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn onClick={() => onNavigate?.('TODAY' as any)}>Hoy</Btn>
+        <Btn onClick={() => onNavigate?.('PREV' as any)}>←</Btn>
+        <Btn onClick={() => onNavigate?.('NEXT' as any)}>→</Btn>
+      </div>
+
+      <div style={{ fontWeight: 900, fontSize: 18 }}>{label}</div>
+
+      <div
+        style={{
+          display: 'inline-flex',
+          border: '1px solid var(--border)',
+          borderRadius: 10,
+          overflow: 'hidden',
+        }}
+      >
+        <SegBtn active={view === 'week'} onClick={() => onView?.('week' as View)}>Semana</SegBtn>
+        <SegBtn active={view === 'day'} onClick={() => onView?.('day' as View)}>Día</SegBtn>
+      </div>
+    </div>
+  );
+};
+
+/** “Píldora” para eventos (usa los colores de eventPropGetter) */
+const EventPill: React.FC<EventProps<any>> = ({ event }) => {
+  return (
+    <div
+      title={event?.task?.description || event?.title}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '4px 8px',
+        borderRadius: 12,
+        fontWeight: 800,
+        boxShadow: '0 2px 8px rgba(0,0,0,.06)',
+        border: '1px dashed rgba(0,0,0,.12)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        maxWidth: '100%',
+      }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{event.title}</span>
+    </div>
+  );
+};
+
 export default function TasksBoard() {
   const nav = useNavigate()
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['tasks'],
     queryFn: async () => (await api.get('/tasks')).data as Task[],
   })
@@ -99,15 +238,17 @@ export default function TasksBoard() {
     let color = '#111'
     let border = '1px solid rgba(0,0,0,.08)'
 
-    if (isHigh && isOpen && !isPastDay) bg = '#FCA5A5' // rojo suave
-    if (isPastDay && isOpen) {
-      bg = '#E5E7EB' // gris para "ya pasó"
-      color = '#374151'
-    }
     if (isDone) {
-      bg = '#E5E7EB' // gris para finalizadas
-      color = '#6B7280'
+      // ✅ Finalizadas en verde
+      bg = '#DCFCE7'
+      color = '#065F46'
       border = '1px dashed #9CA3AF'
+    } else {
+      if (isHigh && isOpen && !isPastDay) bg = '#FCA5A5' // rojo suave
+      if (isPastDay && isOpen) {
+        bg = '#E5E7EB' // gris para "ya pasó"
+        color = '#374151'
+      }
     }
 
     return { style: { backgroundColor: bg, color, border, borderRadius: 8, fontWeight: 700, padding: '2px 6px' } }
@@ -281,9 +422,14 @@ export default function TasksBoard() {
     )
   }
 
+  const overlayVisible = isLoading && !data
+
   return (
     <Layout title="Tareas visibles para mí">
-      {isLoading && <div className="card">Cargando…</div>}
+      {/* Overlay inicial (como en PaymentsCalendar) */}
+      <PageLoader visible={overlayVisible} />
+
+      {isLoading && !data && <div className="card" style={{ opacity: 0.35 }}>Cargando…</div>}
       {isError && (
         <div className="card">
           Error.{' '}
@@ -294,12 +440,15 @@ export default function TasksBoard() {
       )}
 
       {/* --------- CALENDARIO SEMANAL --------- */}
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card" style={{ padding: 0, opacity: overlayVisible || isFetching ? 0.35 : 1 }}>
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
           <strong>Calendario semanal</strong>
           <span className="muted" style={{ marginLeft: 8 }}>
-            — rojo: importantes · amarillo: pendientes · gris: pasadas/finalizadas
+            — rojo: importantes · amarillo: pendientes · gris: pasadas · <span style={{ color: '#065F46', fontWeight: 700 }}>verde: finalizadas</span>
           </span>
+          {isFetching && (
+            <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>(actualizando…)</span>
+          )}
         </div>
         <div style={{ height: 600 }}>
           <Calendar
@@ -312,6 +461,7 @@ export default function TasksBoard() {
             endAccessor="end"
             onSelectEvent={onSelectEvent}
             eventPropGetter={eventPropGetter}
+            components={{ toolbar: ModernToolbar, event: EventPill }}
             toolbar
             popup
             min={minTime}
@@ -336,7 +486,7 @@ export default function TasksBoard() {
       </div>
 
       {/* --------- MÉTRICAS --------- */}
-      <div className="grid grid-3">
+      <div className="grid grid-3" style={{ opacity: overlayVisible || isFetching ? 0.35 : 1 }}>
         {stats.map((s) => (
           <div key={s.title} className="card">
             <div className="card-sub">{s.title}</div>
@@ -355,7 +505,7 @@ export default function TasksBoard() {
       {showOpen && (
         <>
           {!abiertas.length ? (
-            <div className="card">No hay tareas.</div>
+            <div className="card" style={{ opacity: overlayVisible || isFetching ? 0.35 : 1 }}>No hay tareas.</div>
           ) : (
             abiertas.map((t) => <TaskCardOpen key={t._id} t={t} />)
           )}
@@ -372,7 +522,7 @@ export default function TasksBoard() {
       {showDone && (
         <>
           {!finalizadas.length ? (
-            <div className="card">No hay tareas finalizadas.</div>
+            <div className="card" style={{ opacity: overlayVisible || isFetching ? 0.35 : 1 }}>No hay tareas finalizadas.</div>
           ) : (
             finalizadas.map((t) => <TaskCardDone key={t._id} t={t} />)
           )}

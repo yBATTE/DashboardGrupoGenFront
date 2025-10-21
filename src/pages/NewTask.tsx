@@ -33,6 +33,19 @@ function displayUser(u: any): string {
   return u.displayName || full || u.email || u._id || '—';
 }
 
+/** 🔧 Redondea una fecha a múltiplos de 30 minutos (00/30) */
+function roundTo30(d: Date) {
+  const out = new Date(d);
+  const m = out.getMinutes();
+  const rounded = Math.round(m / 30) * 30;
+  out.setMinutes(rounded % 60, 0, 0);
+  // Si redondeó a 60, sube una hora
+  if (rounded === 60) {
+    out.setHours(out.getHours() + 1, 0, 0, 0);
+  }
+  return out;
+}
+
 /* ===================================================== */
 /*                     PÁGINA PRINCIPAL                  */
 /* ===================================================== */
@@ -44,8 +57,9 @@ export default function NewTask() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
 
-  /* --- CAMBIO: usar Date en vez de string --- */
-  const [dueAt, setDueAt] = useState<Date | null>(null); // obligatorio
+  /* === CAMBIO: default = ahora (redondeado a 30') y conservar hora al cambiar fecha === */
+  const nowRounded = useMemo(() => roundTo30(new Date()), []);
+  const [dueAt, setDueAt] = useState<Date | null>(nowRounded); // ← ahora por defecto
   const [showDueError, setShowDueError] = useState(false);
 
   // selección
@@ -102,6 +116,18 @@ export default function NewTask() {
     if (dueAt) setShowDueError(false);
   }, [dueAt]);
 
+  /** ✅ Conserva la HORA actual (o la ya elegida) cuando cambiás solo la FECHA */
+  function handleDueChange(d: Date | null) {
+    if (!d) {
+      setDueAt(null);
+      return;
+    }
+    const base = dueAt ?? nowRounded; // si no había nada, usar "ahora"
+    const merged = new Date(d);
+    merged.setHours(base.getHours(), base.getMinutes(), 0, 0);
+    setDueAt(merged);
+  }
+
   return (
     <Layout
       title="Nueva tarea"
@@ -142,12 +168,12 @@ export default function NewTask() {
 
           {/* Vencimiento (obligatorio) */}
           <label className="label">Vence el *</label>
-          {/* --- NUEVO: DatePicker bonito con intervalos de 30 min --- */}
+          {/* DatePicker con hora actual por defecto y preservación de hora */}
           <DatePicker
             selected={dueAt}
-            onChange={(d) => setDueAt(d)}
+            onChange={handleDueChange}
             showTimeSelect
-            timeIntervals={30}           // 30 minutos
+            timeIntervals={30}
             timeCaption="Hora"
             dateFormat="dd/MM/yyyy HH:mm"
             locale={es}
