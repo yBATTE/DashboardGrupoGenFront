@@ -1,4 +1,3 @@
-// apps/web/src/pages/AdminUserDetail.tsx
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { useMemo, useState } from "react";
@@ -21,14 +20,373 @@ const fmtARS = (n: number) =>
 
 // Mostrar Nombre + Apellido donde sea posible
 function displayUser(u: any): string {
-  if (!u) return '—';
-  if (typeof u === 'string') return u;
-  const full = [u.name, u.lastName].filter(Boolean).join(' ');
-  console.log(u)
-  return u.displayName || full || u.email || u._id || '—' || u.lastName;
+  if (!u) return "—";
+  if (typeof u === "string") return u;
+  const full = [u.name, u.lastName].filter(Boolean).join(" ");
+  return u.displayName || full || u.email || u._id || "—";
+}
+
+function monthRangeFromYYYYMM(yyyyMm: string) {
+  // yyyyMm tipo "2025-10"
+  const [y, m] = yyyyMm.split("-").map(Number);
+  const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
+  const end = new Date(y, m, 0, 23, 59, 59, 999); // último día del mes
+  return { start, end };
 }
 
 type ViewMode = "payments" | "tasks";
+
+/* ============ UI helpers ============ */
+function useDebounced<T>(value: T, delay = 250) {
+  const [v, setV] = useState(value);
+  React.useEffect(() => {
+    const id = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return v;
+}
+
+function Pager({
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  total: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+  onPageSizeChange: (s: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const canPrev = page > 1;
+  const canNext = page < pages;
+
+  return (
+    <div
+      className="btn-row"
+      style={{
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "10px 12px",
+        borderTop: "1px solid var(--border)",
+        flexWrap: "wrap",
+        gap: 8,
+      }}
+    >
+      <div className="muted" style={{ fontSize: 12 }}>
+        Mostrando {total === 0 ? 0 : (page - 1) * pageSize + 1}–
+        {Math.min(page * pageSize, total)} de {total}
+      </div>
+
+      <div className="btn-row" style={{ gap: 8 }}>
+        {/* ⬇️ Select más grande y legible */}
+        <select
+          className="input"
+          value={pageSize}
+          onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          style={{
+            height: 36,
+            minWidth: 120, // <- ancho cómodo
+            padding: "6px 10px", // <- más aire
+            borderRadius: 10,
+            lineHeight: "20px",
+          }}
+          title="Items por página"
+        >
+          {[10, 25, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n} / pág.
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!canPrev}
+          onClick={() => onPageChange(1)}
+          title="Primera página"
+        >
+          «
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!canPrev}
+          onClick={() => onPageChange(page - 1)}
+          title="Anterior"
+        >
+          ←
+        </button>
+
+        <div className="muted" style={{ minWidth: 110, textAlign: "center" }}>
+          pág. <b>{page}</b> / {pages}
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!canNext}
+          onClick={() => onPageChange(page + 1)}
+          title="Siguiente"
+        >
+          →
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!canNext}
+          onClick={() => onPageChange(pages)}
+          title="Última página"
+        >
+          »
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============ Listas con buscador + paginación ============ */
+function PaymentsListControls({
+  items,
+  title,
+  dateField = "dueAt", // "dueAt" | "paidAt"
+}: {
+  items: Payment[];
+  title: string;
+  dateField?: "dueAt" | "paidAt";
+}) {
+  const [q, setQ] = useState("");
+  const dq = useDebounced(q, 250);
+
+  // filtro por mes (YYYY-MM), vacío = sin filtro
+  const [month, setMonth] = useState<string>("");
+
+  const [page, setPage] = useState(1);
+  const [ps, setPs] = useState(10);
+
+  const filtered = useMemo(() => {
+    const term = dq.trim().toLowerCase();
+
+    let rows = items;
+
+    // 1) filtro de texto
+    if (term) {
+      rows = rows.filter((p) =>
+        String(p.title ?? "")
+          .toLowerCase()
+          .includes(term)
+      );
+    }
+
+    // 2) filtro por mes (usa dueAt o paidAt según dateField)
+    if (month) {
+      const { start, end } = monthRangeFromYYYYMM(month);
+      const s = start.getTime();
+      const e = end.getTime();
+      rows = rows.filter((p) => {
+        const iso = (p as any)?.[dateField] as string | undefined;
+        if (!iso) return false;
+        const t = new Date(iso).getTime();
+        return t >= s && t <= e;
+      });
+    }
+
+    return rows;
+  }, [items, dq, month, dateField]);
+
+  // Orden: más reciente primero por campo dateField; sin fecha al final
+  const sorted = useMemo(() => {
+    return filtered.slice().sort((a, b) => {
+      const ta = (a as any)?.[dateField]
+        ? new Date((a as any)[dateField]).getTime()
+        : -Infinity;
+      const tb = (b as any)?.[dateField]
+        ? new Date((b as any)[dateField]).getTime()
+        : -Infinity;
+      return tb - ta; // DESC
+    });
+  }, [filtered, dateField]);
+
+  const total = sorted.length;
+  const maxPage = Math.max(1, Math.ceil(total / ps));
+  const safePage = Math.min(page, maxPage);
+  const slice = sorted.slice((safePage - 1) * ps, safePage * ps);
+
+  function setMonthAndReset(value: string) {
+    setMonth(value);
+    setPage(1);
+  }
+
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "10px 12px",
+          borderBottom: "1px solid var(--border)",
+          flexWrap: "wrap",
+        }}
+      >
+        <div className="card-sub">{title}</div>
+
+        <div className="btn-row" style={{ gap: 8 }}>
+          {/* Filtro por mes */}
+          <input
+            type="month"
+            className="input"
+            value={month}
+            onChange={(e) => setMonthAndReset(e.target.value)}
+            style={{ height: 32, minWidth: 150 }}
+            title={
+              dateField === "paidAt"
+                ? "Filtrar por mes de pago"
+                : "Filtrar por mes de vencimiento"
+            }
+          />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              const now = new Date();
+              const y = now.getFullYear();
+              const m = String(now.getMonth() + 1).padStart(2, "0");
+              setMonthAndReset(`${y}-${m}`);
+            }}
+            title="Mes actual"
+          >
+            Mes actual
+          </button>
+          {month && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setMonthAndReset("")}
+              title="Quitar filtro de mes"
+            >
+              Limpiar mes
+            </button>
+          )}
+
+          {/* Buscador */}
+          <input
+            className="input"
+            placeholder="Buscar por título…"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
+            style={{ width: 280, height: 32 }}
+            title="Buscar en esta lista"
+          />
+        </div>
+      </div>
+
+      {total === 0 ? (
+        <div className="muted" style={{ padding: 12 }}>
+          No hay resultados.
+        </div>
+      ) : (
+        <PaymentsList items={slice} />
+      )}
+
+      <Pager
+        total={total}
+        page={safePage}
+        pageSize={ps}
+        onPageChange={setPage}
+        onPageSizeChange={(n) => {
+          setPs(n);
+          setPage(1);
+        }}
+      />
+    </div>
+  );
+}
+
+function TasksListControls({
+  items,
+  title,
+  empty,
+}: {
+  items: any[];
+  title: string;
+  empty?: string;
+}) {
+  const [q, setQ] = useState("");
+  const dq = useDebounced(q, 250);
+  const [page, setPage] = useState(1);
+  const [ps, setPs] = useState(10);
+
+  const filtered = useMemo(() => {
+    const term = dq.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((t) =>
+      String(t.title ?? "")
+        .toLowerCase()
+        .includes(term)
+    );
+  }, [items, dq]);
+
+  const total = filtered.length;
+  const maxPage = Math.max(1, Math.ceil(total / ps));
+  const safePage = Math.min(page, maxPage);
+  const slice = filtered.slice((safePage - 1) * ps, safePage * ps);
+
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "10px 12px",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
+        <div className="card-sub">{title}</div>
+        <input
+          className="input"
+          placeholder="Buscar por título…"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setPage(1);
+          }}
+          style={{ width: 280, height: 32 }}
+          title="Buscar en esta lista"
+        />
+      </div>
+
+      {total === 0 ? (
+        <div className="muted" style={{ padding: 12 }}>
+          {empty ?? "Sin resultados."}
+        </div>
+      ) : (
+        <TaskList items={slice} empty="" />
+      )}
+
+      <Pager
+        total={total}
+        page={safePage}
+        pageSize={ps}
+        onPageChange={setPage}
+        onPageSizeChange={(n) => {
+          setPs(n);
+          setPage(1);
+        }}
+      />
+    </div>
+  );
+}
+
+/* ============ Página ============ */
+import * as React from "react";
 
 export default function AdminUserDetail() {
   const { id = "" } = useParams();
@@ -54,6 +412,7 @@ export default function AdminUserDetail() {
     queryKey: ["payments-all", id],
     enabled: !!id,
     queryFn: () => listPaymentsRange({}), // sin rango para tener todo
+    // si querés limitar a 6 meses: listPaymentsRange({ from: from.toISOString(), to: to.toISOString() })
   });
 
   // Equipos del usuario actual
@@ -195,22 +554,18 @@ export default function AdminUserDetail() {
                 </div>
               </div>
 
-              {/* Asignados vencidos */}
-              <div className="card" style={{ marginBottom: 10 }}>
-                <div className="card-sub">Asignados vencidos</div>
-                <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
-                  {userPaymentsOverdue.length}
-                </div>
-                {userPaymentsOverdue.length === 0 ? (
-                  <div className="muted">No hay pagos vencidos.</div>
-                ) : (
-                  <PaymentsList items={userPaymentsOverdue} />
-                )}
-              </div>
+              {/* Asignados vencidos (buscador + paginado) */}
+              <PaymentsListControls
+                title="Asignados vencidos"
+                items={userPaymentsOverdue}
+              />
 
               {/* Lista completa de asignados */}
-              <h3 className="h3">Todos los asignados</h3>
-              <PaymentsList items={userPaymentsAssigned} />
+              <div style={{ height: 10 }} />
+              <PaymentsListControls
+                title="Todos los asignados"
+                items={userPaymentsAssigned}
+              />
 
               {/* Pagados por el usuario */}
               <h2 className="h2" style={{ marginTop: 18 }}>
@@ -222,7 +577,10 @@ export default function AdminUserDetail() {
                   <b>{userPaymentsPaidBy.length}</b>
                 </div>
               </div>
-              <PaymentsList items={userPaymentsPaidBy} />
+              <PaymentsListControls
+                title="Pagados por el usuario"
+                items={userPaymentsPaidBy}
+              />
             </>
           )}
 
@@ -231,23 +589,23 @@ export default function AdminUserDetail() {
             <>
               <ColorLegend />
 
-              <h2 className="h2">Recientes — Creadas por el usuario</h2>
-              <TaskList
-                items={data.lists.created}
+              <TasksListControls
+                title="Recientes — Creadas por el usuario"
+                items={data.lists.created ?? []}
                 empty="No hay tareas creadas."
               />
 
-              <h2 className="h2">
-                Recientes — Asignadas al usuario (incluye equipos)
-              </h2>
-              <TaskList
+              <div style={{ height: 10 }} />
+              <TasksListControls
+                title="Recientes — Asignadas al usuario (incluye equipos)"
                 items={tasksAssigned}
                 empty="No hay tareas asignadas."
               />
 
-              <h2 className="h2">Recientes — Cerradas por el usuario</h2>
-              <TaskList
-                items={data.lists.closed}
+              <div style={{ height: 10 }} />
+              <TasksListControls
+                title="Recientes — Cerradas por el usuario"
+                items={data.lists.closed ?? []}
                 empty="No hay tareas cerradas."
               />
             </>
@@ -258,7 +616,7 @@ export default function AdminUserDetail() {
   );
 }
 
-/* =================== Subcomponentes =================== */
+/* =================== Subcomponentes (presentacionales) =================== */
 function TaskList({ items, empty }: { items: any[]; empty: string }) {
   if (!items?.length) return <div className="card">{empty}</div>;
 
@@ -268,10 +626,9 @@ function TaskList({ items, empty }: { items: any[]; empty: string }) {
     const due = t.dueAt ? new Date(t.dueAt).getTime() : NaN;
     const isOverdue = !isDone && Number.isFinite(due) && due < now;
 
-    // colores consistentes con tu UI
     if (isDone) {
       return {
-        background: "#dcfce7", // verde suave
+        background: "#dcfce7",
         color: "#065f46",
         border: "1px dashed #86efac",
         borderRadius: 12,
@@ -279,15 +636,14 @@ function TaskList({ items, empty }: { items: any[]; empty: string }) {
     }
     if (isOverdue) {
       return {
-        background: "#e5e7eb", // gris
+        background: "#e5e7eb",
         color: "#111827",
         border: "1px solid #d1d5db",
         borderRadius: 12,
       };
     }
-    // pendiente
     return {
-      background: "#fde68a", // amarillo
+      background: "#fde68a",
       color: "#111",
       border: "1px solid rgba(0,0,0,.08)",
       borderRadius: 12,
@@ -402,7 +758,7 @@ function PaymentsList({ items }: { items: Payment[] }) {
   });
 
   return (
-    <div className="card" style={{ padding: 0 }}>
+    <>
       <div
         style={{
           display: "grid",
@@ -493,112 +849,6 @@ function PaymentsList({ items }: { items: Payment[] }) {
           );
         })}
       </ul>
-    </div>
+    </>
   );
-
-  function PaymentsList({ items }: { items: Payment[] }) {
-    if (!items?.length)
-      return <div className="card">No hay pagos asignados.</div>;
-
-    const sorted = items.slice().sort((a, b) => {
-      const ta = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
-      const tb = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
-      return ta - tb;
-    });
-
-    return (
-      <div className="card" style={{ padding: 0 }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1.3fr .8fr .8fr 1fr",
-            gap: 10,
-            padding: "10px 12px",
-            borderBottom: "1px solid var(--border)",
-            fontSize: 12,
-            color: "#6b7280",
-            fontWeight: 700,
-          }}
-        >
-          <div>Título</div>
-          <div>Vencimiento</div>
-          <div>Estado</div>
-          <div>Creado / Pagado</div>
-        </div>
-
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {sorted.map((p) => {
-            const dueStr = fmtDT(p.dueAt);
-            const isPaid = p.status === "paid";
-
-            let badgeStyle: React.CSSProperties = {};
-            let badgeText = "Pendiente";
-            if (isPaid) {
-              badgeText = "Pagado";
-              badgeStyle = {
-                background: "#fef3c7",
-                color: "#111",
-                border: "1px dashed #9CA3AF",
-              };
-            } else {
-              const now = Date.now();
-              const t = p.dueAt ? new Date(p.dueAt).getTime() : undefined;
-              if (t && t < now)
-                badgeStyle = { background: "#111827", color: "#fff" };
-              else if (t && t - now <= 48 * 3600 * 1000)
-                badgeStyle = { background: "#fee2e2", color: "#b91c1c" };
-              else badgeStyle = { background: "#dcfce7", color: "#065f46" };
-            }
-
-            return (
-              <li
-                key={p._id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1.3fr .8fr .8fr 1fr",
-                  gap: 10,
-                  padding: "12px",
-                  borderTop: "1px solid var(--border)",
-                }}
-              >
-                <Link
-                  to={`/payments/${p._id}`}
-                  style={{
-                    textDecoration: "none",
-                    color: "inherit",
-                    fontWeight: 700,
-                  }}
-                >
-                  {p.title}{" "}
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    {fmtARS(p.amount)}
-                  </span>
-                </Link>
-
-                <div className="muted">{dueStr}</div>
-
-                <div>
-                  <span className="badge" style={badgeStyle}>
-                    {badgeText}
-                  </span>
-                </div>
-
-                <div className="muted" style={{ fontSize: 12 }}>
-                  <div>
-                    Creado por: <b>{displayUser(p.createdBy)}</b>
-                  </div>
-                  {isPaid && (
-                    <div>
-                      Pagado por: <b>{displayUser(p.paidBy)}</b>
-                      {p.paidAt ? ` · el ${fmtDT(p.paidAt)}` : ""}
-                    </div>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    );
-  }
 }

@@ -1,4 +1,3 @@
-// apps/web/src/pages/PaymentsCalendar.tsx
 import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -117,13 +116,14 @@ function fmtDate(iso?: string | null) {
   return iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "";
 }
 
+/** dateMode soporta: "due" | "paid" | "overdue" | "upcoming" */
 function buildExportRows(
   payments: Payment[],
   {
     dateMode,
     rangeStart,
     rangeEnd,
-  }: { dateMode: "due" | "paid" | "overdue"; rangeStart: Date; rangeEnd: Date }
+  }: { dateMode: "due" | "paid" | "overdue" | "upcoming"; rangeStart: Date; rangeEnd: Date }
 ) {
   const start = rangeStart.getTime();
   const end = rangeEnd.getTime();
@@ -136,15 +136,17 @@ function buildExportRows(
 
   return payments
     .filter((p) => {
-      // lógica base igual que antes, con filtro extra si "overdue"
       const ref = dateMode === "paid" ? p.paidAt : p.dueAt;
       if (!ref) return false;
       const t = new Date(ref).getTime();
       if (t < start || t > end) return false;
+
       if (dateMode === "paid") return p.status === "paid";
-      if (dateMode === "overdue")
-        return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now;
-      return true; // "due"
+      if (dateMode === "overdue") return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now;
+      if (dateMode === "upcoming") return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() >= now;
+
+      // "due" -> sin filtro extra
+      return true;
     })
     .map((p) => {
       const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
@@ -502,7 +504,7 @@ export default function PaymentsCalendar() {
   }, [payments, usersSelected, teamsSelected]);
 
   /* ===== Toggle global (impacta Calendario + Lista) ===== */
-  type Mode = "due" | "paid" | "overdue";
+  type Mode = "due" | "paid" | "overdue" | "upcoming";
   const [dateMode, setDateMode] = useState<Mode>("due");
 
   /* ===== Eventos base (sin agrupar) ===== */
@@ -528,6 +530,18 @@ export default function PaymentsCalendar() {
     const now = Date.now();
     const rows = baseFiltered.filter(
       (p) => p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now
+    );
+    return rows.map((p) => {
+      const start = new Date(p.dueAt!);
+      const end = addHours(start, 1);
+      return { id: p._id, title: p.title, start, end, payment: p };
+    });
+  }, [baseFiltered]);
+
+  const eventsBaseUpcoming: CalendarEvent[] = useMemo(() => {
+    const now = Date.now();
+    const rows = baseFiltered.filter(
+      (p) => p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() >= now
     );
     return rows.map((p) => {
       const start = new Date(p.dueAt!);
@@ -597,6 +611,10 @@ export default function PaymentsCalendar() {
     return view === Views.MONTH ? groupForMonth(eventsBaseOverdue) : eventsBaseOverdue;
   }, [eventsBaseOverdue, view]);
 
+  const eventsUpcoming: CalendarEvent[] = useMemo(() => {
+    return view === Views.MONTH ? groupForMonth(eventsBaseUpcoming) : eventsBaseUpcoming;
+  }, [eventsBaseUpcoming, view]);
+
   // estilos de eventos
   const eventPropGetter = useCallback((event: CalendarEvent) => {
     if (event.isOverflow) {
@@ -653,36 +671,32 @@ export default function PaymentsCalendar() {
 
   const openDayModal = useCallback(
     (date: Date) => {
-      // Elegimos el campo según el toggle
-      const getField = (p: Payment) =>
-        dateMode === "paid" ? p.paidAt ?? null : p.dueAt ?? null;
-
-      // Rango de ese día (local)
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
       const end   = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
       const nowTs = Date.now();
 
       const rows = (baseFiltered ?? [])
         .filter((p) => {
-          // modo "paid": sólo pagados
           if (dateMode === "paid") {
             if (p.status !== "paid" || !p.paidAt) return false;
             const t = new Date(p.paidAt).getTime();
             return t >= start.getTime() && t <= end.getTime();
           }
-          // modo "overdue": sólo vencidos
           if (dateMode === "overdue") {
             if (!p.dueAt || p.status === "paid") return false;
             const t = new Date(p.dueAt).getTime();
-            if (t >= start.getTime() && t <= end.getTime()) {
-              return t < nowTs;
-            }
-            return false;
+            if (t < start.getTime() || t > end.getTime()) return false;
+            return t < nowTs;
           }
-          // modo "due": como estaba
-          const ref = getField(p);
-          if (!ref) return false;
-          const t = new Date(ref).getTime();
+          if (dateMode === "upcoming") {
+            if (!p.dueAt || p.status === "paid") return false;
+            const t = new Date(p.dueAt).getTime();
+            if (t < start.getTime() || t > end.getTime()) return false;
+            return t >= nowTs;
+          }
+          // "due"
+          if (!p.dueAt) return false;
+          const t = new Date(p.dueAt).getTime();
           return t >= start.getTime() && t <= end.getTime();
         })
         .sort((a, b) => {
@@ -711,16 +725,13 @@ export default function PaymentsCalendar() {
   /* ===== Interacciones del calendario ===== */
   const onSelectEvent = useCallback(
     (e: CalendarEvent) => {
-      // Siempre abrimos el modal del día (sea un pill normal o "+N más")
       openDayModal(e.start);
     },
     [openDayModal]
   );
 
-  // SlotInfo no siempre está tipado en todas las versiones, por eso any
   const onSelectSlot = useCallback(
     (slotInfo: any) => {
-      // slotInfo.start es el inicio del día/time range clickado
       openDayModal(slotInfo.start as Date);
     },
     [openDayModal]
@@ -787,6 +798,14 @@ export default function PaymentsCalendar() {
           if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
           return true;
         }
+        if (dateMode === "upcoming") {
+          if (!p.dueAt || p.status === "paid") return false;
+          const t = new Date(p.dueAt).getTime();
+          if (t < rangeStart || t > rangeEnd) return false;
+          if (t < nowTs) return false;
+          if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
+          return true;
+        }
         // "due"
         const selectedDate = p.dueAt ?? null;
         if (!selectedDate) return false;
@@ -831,7 +850,13 @@ export default function PaymentsCalendar() {
   const fileBaseName = useMemo(
     () =>
       `Pagos_${fmt(monthStart, "yyyy-MM", { locale: es })}_${
-        dateMode === "paid" ? "pagados" : dateMode === "overdue" ? "vencidos" : "vencimiento"
+        dateMode === "paid"
+          ? "pagados"
+          : dateMode === "overdue"
+          ? "vencidos"
+          : dateMode === "upcoming"
+          ? "por_pagar"
+          : "vencimiento"
       }`,
     [monthStart, dateMode]
   );
@@ -973,14 +998,28 @@ export default function PaymentsCalendar() {
               type="button"
               onClick={() => setDateMode("due")}
               className="btn btn-ghost"
-              title="Mostrar por fecha de vencimiento"
+              title="Mostrar todos por fecha de vencimiento"
               style={{
                 padding: "6px 10px",
                 background: dateMode === "due" ? "var(--bg-soft)" : "transparent",
                 fontWeight: dateMode === "due" ? 800 : 600,
               }}
             >
-              Vencimiento
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setDateMode("upcoming")}
+              className="btn btn-ghost"
+              title="Mostrar pendientes en fecha (no vencidos)"
+              style={{
+                padding: "6px 10px",
+                background: dateMode === "upcoming" ? "var(--bg-soft)" : "transparent",
+                fontWeight: dateMode === "upcoming" ? 800 : 600,
+                borderLeft: "1px solid var(--border)",
+              }}
+            >
+              En fecha
             </button>
             <button
               type="button"
@@ -1048,6 +1087,47 @@ export default function PaymentsCalendar() {
                 next: "Siguiente",
                 allDay: "Todo el día",
                 noEventsInRange: "No hay pagos en este rango",
+                date: "Fecha",
+                time: "Hora",
+                event: "Pago",
+                showMore: (total) => `+${total} más`,
+              }}
+            />
+          )}
+
+          {dateMode === "upcoming" && (
+            <Calendar
+              key="calendar-upcoming"
+              localizer={localizer}
+              culture="es"
+              events={eventsUpcoming}
+              defaultView={Views.MONTH}
+              view={view}
+              onView={(v) => setView(v)}
+              views={[Views.MONTH, Views.WEEK, Views.DAY]}
+              startAccessor="start"
+              endAccessor="end"
+              selectable
+              onSelectSlot={onSelectSlot}
+              onSelectEvent={onSelectEvent}
+              onNavigate={setViewDate}
+              eventPropGetter={eventPropGetter}
+              components={{ toolbar: ModernToolbar, event: EventPill }}
+              popup
+              min={minTime}
+              max={maxTime}
+              step={30}
+              timeslots={2}
+              scrollToTime={scrollTo}
+              messages={{
+                month: "Mes",
+                week: "Semana",
+                day: "Día",
+                today: "Hoy",
+                previous: "Anterior",
+                next: "Siguiente",
+                allDay: "Todo el día",
+                noEventsInRange: "No hay pagos pendientes en fecha en este rango",
                 date: "Fecha",
                 time: "Hora",
                 event: "Pago",

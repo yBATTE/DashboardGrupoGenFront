@@ -4,16 +4,17 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../api/axios';
 import { listTeams } from '../api/teams';
-import { searchUsers, BasicUser } from '../api/users';
+import { searchUsers, BasicUser, getMe } from '../api/users';
 import Layout from '../components/Layout';
 
-/* --- NUEVO: datepicker --- */
+/* --- Datepicker --- */
 import DatePicker from 'react-datepicker';
 import { es } from 'date-fns/locale';
 import 'react-datepicker/dist/react-datepicker.css';
 
 type Priority = 'low' | 'medium' | 'high';
-type Team = { _id: string; name: string; members: string[] };
+type MemberLike = string | { _id?: string; id?: string };
+type Team = { _id: string; name: string; members?: MemberLike[]; memberIds?: string[] };
 
 /* ----------------------- Utils ----------------------- */
 function useDebounced<T>(value: T, delay = 250) {
@@ -39,11 +40,27 @@ function roundTo30(d: Date) {
   const m = out.getMinutes();
   const rounded = Math.round(m / 30) * 30;
   out.setMinutes(rounded % 60, 0, 0);
-  // Si redondeó a 60, sube una hora
-  if (rounded === 60) {
-    out.setHours(out.getHours() + 1, 0, 0, 0);
-  }
+  if (rounded === 60) out.setHours(out.getHours() + 1, 0, 0, 0);
   return out;
+}
+
+/* ===== helpers de membresía ===== */
+function normalizeMemberIds(team: Team): Set<string> {
+  const ids = new Set<string>();
+  if (Array.isArray(team.memberIds)) team.memberIds.forEach((x) => x && ids.add(String(x)));
+  if (Array.isArray(team.members)) {
+    team.members.forEach((m) => {
+      if (!m) return;
+      if (typeof m === 'string') ids.add(m);
+      else if (m._id) ids.add(m._id);
+      else if (m.id) ids.add(m.id);
+    });
+  }
+  return ids;
+}
+function isMemberOf(team: Team, userId?: string): boolean {
+  if (!userId) return false;
+  return normalizeMemberIds(team).has(userId);
 }
 
 /* ===================================================== */
@@ -57,9 +74,8 @@ export default function NewTask() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
 
-  /* === CAMBIO: default = ahora (redondeado a 30') y conservar hora al cambiar fecha === */
   const nowRounded = useMemo(() => roundTo30(new Date()), []);
-  const [dueAt, setDueAt] = useState<Date | null>(nowRounded); // ← ahora por defecto
+  const [dueAt, setDueAt] = useState<Date | null>(nowRounded);
   const [showDueError, setShowDueError] = useState(false);
 
   // selección
@@ -70,7 +86,15 @@ export default function NewTask() {
   const [openTeams, setOpenTeams] = useState(false);
   const [openUsers, setOpenUsers] = useState(false);
 
-  // Traer equipos una vez
+  // Me & Teams
+  type Me = { _id: string; email: string; name?: string; lastName?: string; role?: string; roles?: string[]; isAdmin?: boolean };
+  const { data: me } = useQuery<Me>({ queryKey: ['me'], queryFn: getMe });
+  const myId = me?._id as string | undefined;
+  const isAdmin =
+    !!me?.isAdmin ||
+    String(me?.role ?? '').toLowerCase() === 'admin' ||
+    !!me?.roles?.some((r) => String(r).toLowerCase() === 'admin');
+
   const {
     data: teams,
     isLoading: loadingTeams,
@@ -82,17 +106,34 @@ export default function NewTask() {
     queryFn: listTeams,
   });
 
+  // Equipos permitidos: SOLO mis equipos si soy member; todos si admin
+  const allowedTeams = useMemo<Team[]>(() => {
+    if (!teams) return [];
+    const list = teams as Team[];
+    if (isAdmin) return list;
+    if (!myId) return [];
+    return list.filter((t) => isMemberOf(t, myId));
+  }, [teams, isAdmin, myId]);
+
+  // Member: auto-asignarse
+  useEffect(() => {
+    if (!isAdmin && me && myId) {
+      setUsersSelected((prev) =>
+        prev.some((u) => u._id === myId) ? prev : [...prev, { _id: me._id, email: me.email, name: me.name } as BasicUser]
+      );
+    }
+  }, [isAdmin, me, myId]);
+
   // crear tarea
   const { mutateAsync, isPending, error: submitError } = useMutation({
     mutationFn: (payload: any) => api.post('/tasks', payload).then((r) => r.data),
     onSuccess: () => nav('/'),
   });
 
-  const isValid = Boolean(
-    title.trim() &&
-      (teamsSelected.length > 0 || usersSelected.length > 0) &&
-      dueAt
-  );
+  const hasTarget = teamsSelected.length > 0 || usersSelected.length > 0;
+  const isValid = Boolean(title.trim() && hasTarget && dueAt);
+
+  const [permError, setPermError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -100,14 +141,34 @@ export default function NewTask() {
       if (!dueAt) setShowDueError(true);
       return;
     }
+
+    setPermError(null);
+
+    // Saneamos por permisos antes de enviar
+    let teamIds = teamsSelected.map((t) => t._id);
+    let assigneeIds = usersSelected.map((u) => u._id);
+
+    if (!isAdmin) {
+      // Solo yo
+      assigneeIds = assigneeIds.filter((id) => id === myId);
+      // Solo mis equipos
+      const allowedIds = new Set(allowedTeams.map((t) => t._id));
+      teamIds = teamIds.filter((id) => allowedIds.has(id));
+
+      if (!assigneeIds.length && !teamIds.length) {
+        setPermError('No tenés permisos para asignar fuera de tus equipos/usuario.');
+        return;
+      }
+    }
+
     const payload: any = {
       title: title.trim(),
       description: description.trim() || undefined,
       priority,
       visibility: 'team', // compat backend
-      teamIds: teamsSelected.map((t) => t._id),
-      assigneeIds: usersSelected.map((u) => u._id),
-      dueAt: dueAt.toISOString(), // ← serialize Date a ISO
+      teamIds,
+      assigneeIds,
+      dueAt: dueAt.toISOString(),
     };
     await mutateAsync(payload);
   }
@@ -122,7 +183,7 @@ export default function NewTask() {
       setDueAt(null);
       return;
     }
-    const base = dueAt ?? nowRounded; // si no había nada, usar "ahora"
+    const base = dueAt ?? nowRounded;
     const merged = new Date(d);
     merged.setHours(base.getHours(), base.getMinutes(), 0, 0);
     setDueAt(merged);
@@ -166,9 +227,8 @@ export default function NewTask() {
             <option value="high">Alta</option>
           </select>
 
-          {/* Vencimiento (obligatorio) */}
+          {/* Vencimiento */}
           <label className="label">Vence el *</label>
-          {/* DatePicker con hora actual por defecto y preservación de hora */}
           <DatePicker
             selected={dueAt}
             onChange={handleDueChange}
@@ -189,8 +249,10 @@ export default function NewTask() {
             </div>
           )}
 
-          {/* Equipos (modal) */}
-          <label className="label" style={{ marginTop: 12 }}>Equipo(s) (opcional)</label>
+          {/* Equipos */}
+          <label className="label" style={{ marginTop: 12 }}>
+            Equipo(s) — podés elegir uno o varios
+          </label>
           {loadingTeams && <div className="card">Cargando equipos…</div>}
           {errTeams && (
             <div
@@ -211,7 +273,8 @@ export default function NewTask() {
               type="button"
               className="btn btn-outline"
               onClick={() => setOpenTeams(true)}
-              disabled={loadingTeams || !!errTeams}
+              disabled={loadingTeams || !!errTeams || (!isAdmin && !allowedTeams.length)}
+              title={!isAdmin && !allowedTeams.length ? 'No pertenecés a ningún equipo' : undefined}
             >
               + Elegir equipos
             </button>
@@ -235,18 +298,30 @@ export default function NewTask() {
             </div>
           )}
 
-          {/* Usuarios (modal) */}
+          {/* Usuarios */}
           <label className="label" style={{ marginTop: 12 }}>
-            Asignar a usuario(s) (opcional)
+            Asignar a usuario(s){!isAdmin && ' (solo vos)'}
           </label>
           <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => setOpenUsers(true)}
-            >
-              + Elegir usuarios
-            </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setOpenUsers(true)}
+              >
+                + Elegir usuarios
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled
+                title="Solo el administrador puede elegir otros usuarios"
+                style={{ opacity: 0.5, pointerEvents: 'none' }}
+              >
+                + Elegir usuarios
+              </button>
+            )}
           </div>
 
           {usersSelected.length > 0 && (
@@ -259,11 +334,27 @@ export default function NewTask() {
                     onClick={() =>
                       setUsersSelected((prev) => prev.filter((x) => x._id !== u._id))
                     }
+                    disabled={!isAdmin && u._id === myId && usersSelected.length === 1}
+                    title={
+                      !isAdmin && u._id === myId && usersSelected.length === 1
+                        ? 'Dejá al menos tu usuario o elegí un equipo propio.'
+                        : undefined
+                    }
                   >
                     ×
                   </button>
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Permisos */}
+          {permError && (
+            <div
+              className="card"
+              style={{ borderColor: 'var(--danger)', background: '#fff4f4', marginTop: 12 }}
+            >
+              {permError}
             </div>
           )}
 
@@ -293,7 +384,7 @@ export default function NewTask() {
       {/* Modales */}
       {openTeams && (
         <TeamPickerModal
-          teams={teams ?? []}
+          teams={isAdmin ? (teams ?? []) as Team[] : allowedTeams}
           initiallySelected={teamsSelected}
           onClose={() => setOpenTeams(false)}
           onSave={(sel) => {
@@ -303,7 +394,8 @@ export default function NewTask() {
         />
       )}
 
-      {openUsers && (
+      {/* Solo admin puede abrir modal de usuarios */}
+      {isAdmin && openUsers && (
         <UserPickerModal
           initiallySelected={usersSelected}
           onClose={() => setOpenUsers(false)}
@@ -352,30 +444,25 @@ function TeamPickerModal({
   onSave: (teams: Team[]) => void;
   onClose: () => void;
 }) {
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState('');
   const dq = useDebounced(q, 200);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initiallySelected.map((t) => t._id))
   );
 
+  const byId = useMemo(() => new Map(teams.map((t) => [t._id, t])), [teams]);
+
   const pool = useMemo(
     () => (teams ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)),
     [teams]
   );
-  const byId = useMemo(() => new Map(pool.map((t) => [t._id, t])), [pool]);
 
   const filtered = useMemo(() => {
     const term = dq.trim().toLowerCase();
     if (!term) return pool;
     return pool.filter((t) => t.name.toLowerCase().includes(term));
   }, [pool, dq]);
-
-  // Mostrar solo los NO seleccionados en la lista
-  const available = useMemo(
-    () => filtered.filter((t) => !selectedIds.has(t._id)),
-    [filtered, selectedIds]
-  );
 
   function toggle(id: string) {
     setSelectedIds((prev) => {
@@ -393,15 +480,13 @@ function TeamPickerModal({
     onSave(items);
   }
 
-  const hasSel = selectedIds.size > 0;
-
   const rowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: 10,
-    padding: "10px 12px",
-    borderBottom: "1px solid var(--border)",
-    cursor: "pointer",
+    padding: '10px 12px',
+    borderBottom: '1px solid var(--border)',
+    cursor: 'pointer',
   };
 
   return (
@@ -414,57 +499,41 @@ function TeamPickerModal({
         autoFocus
       />
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-        Click en un equipo para agregarlo. Usá “×” para quitarlo.
+        Marcá uno o varios equipos a los que pertenece la tarea.
       </div>
 
       <div
         style={{
           marginTop: 10,
-          border: "1px solid var(--border)",
+          border: '1px solid var(--border)',
           borderRadius: 12,
           height: 360,
-          display: "flex",
-          flexDirection: "column",
+          overflow: 'auto',
         }}
       >
-        {/* Lista (solo no seleccionados) */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {available.map((t) => (
-            <div
-              key={t._id}
-              role="button"
-              tabIndex={0}
-              onClick={() => toggle(t._id)}
-              onKeyDown={(e) =>
-                (e.key === "Enter" || e.key === " ") && toggle(t._id)
-              }
-              style={rowStyle}
-              title="Agregar a seleccionados"
-            >
-              {/* sin checkbox */}
+        {filtered.map((t) => {
+          const checked = selectedIds.has(t._id);
+          return (
+            <label key={t._id} style={rowStyle} title={checked ? 'Quitar' : 'Agregar'}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(t._id)}
+                style={{ width: 18, height: 18 }}
+              />
               <div style={{ fontWeight: 700 }}>{t.name}</div>
-              <div className="muted">{t.members?.length ?? 0} miembro/s</div>
-            </div>
-          ))}
-          {!available.length && (
-            <div className="muted" style={{ padding: 12 }}>
-              No hay equipos para agregar.
-            </div>
-          )}
-        </div>
+            </label>
+          );
+        })}
+        {!filtered.length && (
+          <div className="muted" style={{ padding: 12 }}>
+            No hay equipos para mostrar.
+          </div>
+        )}
+      </div>
 
-        {/* Seleccionados (transición sin cambiar altura total) */}
-        <div
-          style={{
-            borderTop: "1px solid var(--border)",
-            padding: hasSel ? "8px 10px" : "0 10px",
-            maxHeight: hasSel ? 200 : 0,
-            opacity: hasSel ? 1 : 0,
-            overflow: "hidden",
-            transition:
-              "max-height .25s ease, opacity .2s ease, padding .2s ease",
-          }}
-        >
+      {selectedIds.size > 0 && (
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
           <div className="muted" style={{ marginBottom: 6 }}>
             Seleccionados:
           </div>
@@ -483,182 +552,7 @@ function TeamPickerModal({
             })}
           </div>
         </div>
-      </div>
-
-      <div className="btn-row" style={{ marginTop: 12 }}>
-        <button className="btn btn-primary" onClick={save}>
-          Agregar
-        </button>
-        <button className="btn btn-ghost" onClick={onClose}>
-          Cancelar
-        </button>
-      </div>
-    </ModalBase>
-  );
-}
-
-/* ===================================================== */
-/*                     MODAL DE USUARIOS                 */
-/* ===================================================== */
-function UserPickerModal({
-  initiallySelected,
-  onSave,
-  onClose,
-}: {
-  initiallySelected: BasicUser[];
-  onSave: (users: BasicUser[]) => void;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const dq = useDebounced(q, 250);
-
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(initiallySelected.map((u) => u._id))
-  );
-  const [cache, setCache] = useState<Record<string, BasicUser>>(
-    () => Object.fromEntries(initiallySelected.map((u) => [u._id, u]))
-  );
-
-  const { data: results, isLoading } = useQuery({
-    queryKey: ["userSearch", dq],
-    queryFn: () => searchUsers(dq),
-  });
-
-  useEffect(() => {
-    if (results?.length) {
-      setCache((prev) => ({
-        ...prev,
-        ...Object.fromEntries(results.map((u) => [u._id, u])),
-      }));
-    }
-  }, [results]);
-
-  // Lista base
-  const list = results ?? [];
-
-  // Ocultar los ya seleccionados en la lista
-  const available = useMemo(
-    () => list.filter((u) => !selectedIds.has(u._id)),
-    [list, selectedIds]
-  );
-
-  function toggle(id: string) {
-    setSelectedIds((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  }
-
-  function save() {
-    const ids = Array.from(selectedIds);
-    const users = ids.map((id) => cache[id]).filter(Boolean) as BasicUser[];
-    onSave(users);
-  }
-
-  const hasSel = selectedIds.size > 0;
-
-  const rowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "10px 12px",
-    borderBottom: "1px solid var(--border)",
-    cursor: "pointer",
-  };
-
-  return (
-    <ModalBase title="Elegir usuarios" onClose={onClose}>
-      <input
-        className="input"
-        placeholder="Buscar por nombre o email…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        autoFocus
-      />
-      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-        Click en un usuario para agregarlo. Usá “×” para quitarlo.
-      </div>
-
-      <div
-        style={{
-          marginTop: 10,
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          height: 360,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Lista (solo no seleccionados) */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {isLoading && <div className="card">Buscando…</div>}
-          {!isLoading && !available.length && (
-            <div className="muted" style={{ padding: 12 }}>
-              No hay resultados
-            </div>
-          )}
-          {available.map((u) => {
-            const label =
-              "lastName" in u && (u as any).lastName
-                ? `${u.name ?? ""} ${(u as any).lastName}`.trim()
-                : u.name || "(sin nombre)";
-            return (
-              <div
-                key={u._id}
-                role="button"
-                tabIndex={0}
-                onClick={() => toggle(u._id)}
-                onKeyDown={(e) =>
-                (e.key === "Enter" || e.key === " ") && toggle(u._id)
-                }
-                style={rowStyle}
-                title="Agregar a seleccionados"
-              >
-                {/* sin checkbox */}
-                <div style={{ fontWeight: 700 }}>{label}</div>
-                <div className="muted">{u.email}</div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Seleccionados (transición sin cambiar altura total) */}
-        <div
-          style={{
-            borderTop: "1px solid var(--border)",
-            padding: hasSel ? "8px 10px" : "0 10px",
-            maxHeight: hasSel ? 200 : 0,
-            opacity: hasSel ? 1 : 0,
-            overflow: "hidden",
-            transition:
-              "max-height .25s ease, opacity .2s ease, padding .2s ease",
-          }}
-        >
-          <div className="muted" style={{ marginBottom: 6 }}>
-            Seleccionados:
-          </div>
-          <div className="chips">
-            {Array.from(selectedIds).map((id) => {
-              const u = cache[id];
-              if (!u) return null;
-              const label =
-                "lastName" in u && (u as any).lastName
-                  ? `${u.name ?? ""} ${(u as any).lastName}`.trim()
-                  : u.name || u.email;
-              return (
-                <span key={id} className="chip">
-                  {label}
-                  <button type="button" onClick={() => toggle(id)}>
-                    ×
-                  </button>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      )}
 
       <div className="btn-row" style={{ marginTop: 12 }}>
         <button className="btn btn-primary" onClick={save}>
@@ -684,34 +578,27 @@ function ModalBase({
   children: React.ReactNode;
   onClose: () => void;
 }) {
-  // ❌ Sin ESC: se cierra solo con el botón "Cerrar"
-
   return (
     <div
       role="dialog"
       aria-modal="true"
-      // 👇 SIN onClick={onClose} en el overlay
       style={{
-        position: "fixed",
+        position: 'fixed',
         inset: 0,
-        background: "rgba(0,0,0,.35)",
+        background: 'rgba(0,0,0,.35)',
         zIndex: 60,
-        display: "grid",
-        placeItems: "center",
+        display: 'grid',
+        placeItems: 'center',
         padding: 16,
       }}
     >
-      <div
-        className="card"
-        // 👇 sin stopPropagation porque ya no cerramos por overlay
-        style={{ maxWidth: 640, width: "100%" }}
-      >
+      <div className="card" style={{ maxWidth: 640, width: '100%' }}>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
+            display: 'flex',
+            justifyContent: 'space-between',
             gap: 10,
-            alignItems: "center",
+            alignItems: 'center',
             marginBottom: 10,
           }}
         >
@@ -723,5 +610,171 @@ function ModalBase({
         {children}
       </div>
     </div>
+  );
+}
+
+/* ===================================================== */
+/*                     MODAL DE USUARIOS                 */
+/* ===================================================== */
+function UserPickerModal({
+  initiallySelected,
+  onSave,
+  onClose,
+}: {
+  initiallySelected: BasicUser[];
+  onSave: (users: BasicUser[]) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const dq = useDebounced(q, 250);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(initiallySelected.map((u) => u._id))
+  );
+  const [cache, setCache] = useState<Record<string, BasicUser>>(
+    () => Object.fromEntries(initiallySelected.map((u) => [u._id, u]))
+  );
+
+  const { data: results, isLoading } = useQuery({
+    queryKey: ['userSearch', dq],
+    queryFn: () => searchUsers(dq),
+  });
+
+  useEffect(() => {
+    if (results?.length) {
+      setCache((prev) => ({
+        ...prev,
+        ...Object.fromEntries(results.map((u) => [u._id, u])),
+      }));
+    }
+  }, [results]);
+
+  const list = results ?? [];
+  const available = useMemo(
+    () => list.filter((u) => !selectedIds.has(u._id)),
+    [list, selectedIds]
+  );
+
+  function toggle(id: string) {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function save() {
+    const ids = Array.from(selectedIds);
+    const users = ids.map((id) => cache[id]).filter(Boolean) as BasicUser[];
+    onSave(users);
+  }
+
+  const hasSel = selectedIds.size > 0;
+
+  const rowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 12px',
+    borderBottom: '1px solid var(--border)',
+    cursor: 'pointer',
+  };
+
+  return (
+    <ModalBase title="Elegir usuarios" onClose={onClose}>
+      <input
+        className="input"
+        placeholder="Buscar por nombre o email…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        autoFocus
+      />
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        Click en un usuario para agregarlo. Usá “×” para quitarlo.
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          height: 360,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {isLoading && <div className="card">Buscando…</div>}
+          {!isLoading && !available.length && (
+            <div className="muted" style={{ padding: 12 }}>
+              No hay resultados
+            </div>
+          )}
+          {available.map((u) => {
+            const label =
+              'lastName' in u && (u as any).lastName
+                ? `${u.name ?? ''} ${(u as any).lastName}`.trim()
+                : u.name || '(sin nombre)';
+            return (
+              <div
+                key={u._id}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggle(u._id)}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle(u._id)}
+                style={rowStyle}
+                title="Agregar a seleccionados"
+              >
+                <div style={{ fontWeight: 700 }}>{label}</div>
+                <div className="muted">{u.email}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            borderTop: '1px solid var(--border)',
+            padding: hasSel ? '8px 10px' : '0 10px',
+            maxHeight: hasSel ? 200 : 0,
+            opacity: hasSel ? 1 : 0,
+            overflow: 'hidden',
+            transition: 'max-height .25s ease, opacity .2s ease, padding .2s ease',
+          }}
+        >
+          <div className="muted" style={{ marginBottom: 6 }}>
+            Seleccionados:
+          </div>
+          <div className="chips">
+            {Array.from(selectedIds).map((id) => {
+              const u = cache[id];
+              if (!u) return null;
+              const label =
+                'lastName' in u && (u as any).lastName
+                  ? `${u.name ?? ''} ${(u as any).lastName}`.trim()
+                  : u.name || u.email;
+              return (
+                <span key={id} className="chip">
+                  {label}
+                  <button type="button" onClick={() => toggle(id)}>
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="btn-row" style={{ marginTop: 12 }}>
+        <button className="btn btn-primary" onClick={save}>
+          Agregar
+        </button>
+        <button className="btn btn-ghost" onClick={onClose}>
+          Cancelar
+        </button>
+      </div>
+    </ModalBase>
   );
 }

@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { createPayment } from "../api/payments";
 import { listTeams } from "../api/teams";
-import { searchUsers, BasicUser } from "../api/users";
+import { searchUsers, BasicUser, getMe } from "../api/users";
 
 /* --- NUEVO: datepicker --- */
 import DatePicker from "react-datepicker";
@@ -12,7 +12,7 @@ import { es } from "date-fns/locale";
 import "react-datepicker/dist/react-datepicker.css";
 
 /* ----------------------- Tipos ----------------------- */
-type Team = { _id: string; name: string; members: string[] };
+type Team = { _id: string; name: string; members: Array<string | { _id: string }> };
 
 /* ----------------------- Utils ----------------------- */
 function useDebounced<T>(value: T, delay = 250) {
@@ -43,8 +43,8 @@ const AR_CURRENCY = new Intl.NumberFormat("es-AR", {
 });
 
 function MoneyInputAR({
-  value, // number | null
-  onChange, // (n: number | null) => void
+  value,
+  onChange,
   placeholder = "$ 0,00",
   className = "input",
 }: {
@@ -95,8 +95,6 @@ export default function NewPayment() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState<number | null>(null);
-
-  /* --- CAMBIO: ahora usamos Date en vez de string --- */
   const [dueAt, setDueAt] = useState<Date | null>(null);
 
   // selección
@@ -107,11 +105,38 @@ export default function NewPayment() {
   const [openTeams, setOpenTeams] = useState(false);
   const [openUsers, setOpenUsers] = useState(false);
 
+  // === Me (rol)
+  type Me = { _id: string; email: string; name?: string; lastName?: string; roles?: string[] };
+  const { data: me } = useQuery<Me>({ queryKey: ["me"], queryFn: getMe, staleTime: 60_000 });
+  const myId = me?._id ?? "";
+  const isAdmin = !!me?.roles?.some((r) => String(r).toLowerCase() === "admin");
+
   // Traer equipos una vez
-  const { data: teams } = useQuery({
+  const { data: allTeams } = useQuery({
     queryKey: ["teams"],
     queryFn: listTeams,
   });
+
+  // Filtrado de equipos según rol:
+  const visibleTeams: Team[] = useMemo(() => {
+    const teams = (allTeams ?? []) as Team[];
+    if (isAdmin) return teams;
+    if (!myId) return [];
+    return teams.filter((t) =>
+      (t.members ?? []).some((m) => (typeof m === "string" ? m === myId : m?._id === myId))
+    );
+  }, [allTeams, isAdmin, myId]);
+
+  // Si es MEMBER: preseleccionar su propio usuario y bloquear picker de usuarios
+  useEffect(() => {
+    if (!me) return;
+    if (!isAdmin) {
+      setUsersSelected([{ _id: me._id, email: me.email, name: me.name } as BasicUser]);
+    } else {
+      // admin: no forzar selección
+      setUsersSelected((prev) => prev);
+    }
+  }, [me, isAdmin]);
 
   const mutation = useMutation({
     mutationFn: (payload: any) => createPayment(payload),
@@ -122,7 +147,7 @@ export default function NewPayment() {
     title.trim() &&
       amount != null &&
       amount >= 0 &&
-      dueAt && // ahora es Date
+      dueAt &&
       (teamsSelected.length > 0 || usersSelected.length > 0)
   );
 
@@ -136,7 +161,7 @@ export default function NewPayment() {
       title: title.trim(),
       description: description.trim() || undefined,
       amount: normalizedAmount,
-      dueAt: dueAt.toISOString(), // equivalente a lo anterior, pero desde Date
+      dueAt: dueAt.toISOString(),
       teamIds: teamsSelected.map((t) => t._id),
       assigneeIds: usersSelected.map((u) => u._id),
     });
@@ -173,7 +198,6 @@ export default function NewPayment() {
             Vence el *
           </label>
 
-          {/* --- NUEVO: DatePicker con intervalos de 30 min --- */}
           <DatePicker
             selected={dueAt}
             onChange={(d) => setDueAt(d)}
@@ -191,7 +215,7 @@ export default function NewPayment() {
 
           {/* ---------- Equipos ---------- */}
           <label className="label" style={{ marginTop: 12 }}>
-            Equipo(s)
+            Equipo(s) — {isAdmin ? "podés elegir uno o varios" : "solo tus equipos"}
           </label>
           <div className="btn-row">
             <button
@@ -223,13 +247,15 @@ export default function NewPayment() {
 
           {/* ---------- Usuarios ---------- */}
           <label className="label" style={{ marginTop: 12 }}>
-            Asignar a usuario(s)
+            Asignar a usuario(s) {isAdmin ? "" : "(solo vos)"}
           </label>
           <div className="btn-row">
             <button
               type="button"
               className="btn btn-outline"
               onClick={() => setOpenUsers(true)}
+              disabled={!isAdmin} // ← member bloqueado, admin habilitado
+              title={isAdmin ? "Elegir usuarios" : "Solo podés asignarte a vos"}
             >
               + Elegir usuarios
             </button>
@@ -276,7 +302,7 @@ export default function NewPayment() {
       {/* Modales */}
       {openTeams && (
         <TeamPickerModal
-          teams={teams ?? []}
+          teams={visibleTeams ?? []}
           initiallySelected={teamsSelected}
           onClose={() => setOpenTeams(false)}
           onSave={(sel) => {
@@ -286,7 +312,7 @@ export default function NewPayment() {
         />
       )}
 
-      {openUsers && (
+      {openUsers && isAdmin && (
         <UserPickerModal
           initiallySelected={usersSelected}
           onClose={() => setOpenUsers(false)}
@@ -424,7 +450,6 @@ function TeamPickerModal({
               style={rowStyle}
               title="Agregar a seleccionados"
             >
-              {/* sin checkbox */}
               <div style={{ fontWeight: 700 }}>{t.name}</div>
               <div className="muted">{t.members?.length ?? 0} miembro/s</div>
             </div>
@@ -436,7 +461,7 @@ function TeamPickerModal({
           )}
         </div>
 
-        {/* Seleccionados (transición sin cambiar altura total) */}
+        {/* Seleccionados */}
         <div
           style={{
             borderTop: "1px solid var(--border)",
@@ -594,12 +619,11 @@ function UserPickerModal({
                 tabIndex={0}
                 onClick={() => toggle(u._id)}
                 onKeyDown={(e) =>
-                (e.key === "Enter" || e.key === " ") && toggle(u._id)
+                  (e.key === "Enter" || e.key === " ") && toggle(u._id)
                 }
                 style={rowStyle}
                 title="Agregar a seleccionados"
               >
-                {/* sin checkbox */}
                 <div style={{ fontWeight: 700 }}>{label}</div>
                 <div className="muted">{u.email}</div>
               </div>
@@ -607,7 +631,7 @@ function UserPickerModal({
           })}
         </div>
 
-        {/* Seleccionados (transición sin cambiar altura total) */}
+        {/* Seleccionados */}
         <div
           style={{
             borderTop: "1px solid var(--border)",
@@ -668,12 +692,10 @@ function ModalBase({
   onClose: () => void;
 }) {
   // ❌ Sin ESC: se cierra solo con el botón "Cerrar"
-
   return (
     <div
       role="dialog"
       aria-modal="true"
-      // 👇 SIN onClick={onClose} en el overlay
       style={{
         position: "fixed",
         inset: 0,
@@ -686,7 +708,6 @@ function ModalBase({
     >
       <div
         className="card"
-        // 👇 sin stopPropagation porque ya no cerramos por overlay
         style={{ maxWidth: 640, width: "100%" }}
       >
         <div
