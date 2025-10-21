@@ -99,42 +99,14 @@ function PageLoader({
       }}
     >
       <div style={{ display: "grid", gap: 12, placeItems: "center" }}>
-        <svg
-          width="48"
-          height="48"
-          viewBox="0 0 24 24"
-          role="img"
-          aria-label="cargando"
-        >
-          <circle
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            strokeWidth="4"
-            fill="none"
-            opacity="0.15"
-          />
-          <path
-            d="M22 12a10 10 0 0 0-10-10"
-            stroke="currentColor"
-            strokeWidth="4"
-            fill="none"
-          >
-            <animateTransform
-              attributeName="transform"
-              type="rotate"
-              from="0 12 12"
-              to="360 12 12"
-              dur="0.8s"
-              repeatCount="indefinite"
-            />
+        <svg width="48" height="48" viewBox="0 0 24 24" role="img" aria-label="cargando">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.15" />
+          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" fill="none">
+            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
           </path>
         </svg>
         <div style={{ fontWeight: 800 }}>{text}</div>
-        <div style={{ fontSize: 12, color: "#6b7280" }}>
-          Preparando calendario y lista de pagos…
-        </div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>Preparando calendario y lista de pagos…</div>
       </div>
     </div>
   );
@@ -178,9 +150,6 @@ function buildExportRows(
         "Creado el": fmtD((p as any)?.createdAt),
         "Pagado por": p.status === "paid" ? displayUser(p.paidBy) : "",
         "Pagado el": p.status === "paid" ? fmtD(p.paidAt) : "",
-        // ❌ Eliminados:
-        // Equipos: ...
-        // Asignados: ...
         Descripción: (p as any)?.description ?? "",
         Id: p._id,
       };
@@ -282,18 +251,9 @@ const ModernToolbar: React.FC<ToolbarProps<CalendarEvent, object>> = ({
           overflow: "hidden",
         }}
       >
-        <SegBtn
-          active={view === "month"}
-          onClick={() => onView("month" as View)}
-        >
-          Mes
-        </SegBtn>
-        <SegBtn active={view === "week"} onClick={() => onView("week" as View)}>
-          Semana
-        </SegBtn>
-        <SegBtn active={view === "day"} onClick={() => onView("day" as View)}>
-          Día
-        </SegBtn>
+        <SegBtn active={view === "month"} onClick={() => onView("month" as View)}>Mes</SegBtn>
+        <SegBtn active={view === "week"} onClick={() => onView("week" as View)}>Semana</SegBtn>
+        <SegBtn active={view === "day"} onClick={() => onView("day" as View)}>Día</SegBtn>
       </div>
     </div>
   );
@@ -557,8 +517,6 @@ export default function PaymentsCalendar() {
   }, [baseFiltered]);
 
   /* ===== Agrupar por día en vista MONTH (máx. 2 visibles + “+N más”) ===== */
-  const MAX_DAY_EVENTS = 2;
-
   function groupForMonth(events: CalendarEvent[]): CalendarEvent[] {
     const keyOf = (d: Date) => fmt(d, "yyyy-MM-dd");
     const byDay = new Map<string, CalendarEvent[]>();
@@ -578,12 +536,10 @@ export default function PaymentsCalendar() {
         .sort((a, b) => a.start.getTime() - b.start.getTime());
 
       if (arr.length <= 1) {
-        // 0 o 1 => mostrar tal cual
         out.push(...arr);
         continue;
       }
 
-      // 2 o más => 1er pago + "+N más" (N = total-1)
       const [first, ...rest] = arr;
       out.push(first);
 
@@ -592,7 +548,7 @@ export default function PaymentsCalendar() {
         id: `overflow-${k}-${rest.length}`,
         title: `+${rest.length} más`,
         start: new Date(yy, mm - 1, dd, 12, 0, 0, 0),
-        end: new Date(yy, mm - 1, dd, 12, 30, 0, 0), // MISMO día
+        end: new Date(yy, mm - 1, dd, 12, 30, 0, 0),
         payment: {
           _id: `overflow-${k}`,
           title: "",
@@ -614,9 +570,7 @@ export default function PaymentsCalendar() {
   }, [eventsBaseDue, view]);
 
   const eventsPaid: CalendarEvent[] = useMemo(() => {
-    return view === Views.MONTH
-      ? groupForMonth(eventsBasePaid)
-      : eventsBasePaid;
+    return view === Views.MONTH ? groupForMonth(eventsBasePaid) : eventsBasePaid;
   }, [eventsBasePaid, view]);
 
   // estilos de eventos
@@ -669,20 +623,61 @@ export default function PaymentsCalendar() {
     };
   }, []);
 
-  /* ===== Overflow modal ===== */
-  const [overflowList, setOverflowList] = useState<CalendarEvent[] | null>(
-    null
+  /* ======= MODAL “Pagos de este día” (día seleccionado) ======= */
+  const [dayList, setDayList] = useState<Payment[] | null>(null);
+  const [dayDate, setDayDate] = useState<Date | null>(null);
+
+  const openDayModal = useCallback(
+    (date: Date) => {
+      // Elegimos el campo según el toggle
+      const getField = (p: Payment) =>
+        dateMode === "paid" ? p.paidAt ?? null : p.dueAt ?? null;
+
+      // Rango de ese día (local)
+      const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+      const end   = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+
+      const rows = (baseFiltered ?? [])
+        .filter((p) => {
+          const ref = getField(p);
+          if (!ref) return false;
+          if (dateMode === "paid" && p.status !== "paid") return false;
+          const t = new Date(ref).getTime();
+          return t >= start.getTime() && t <= end.getTime();
+        })
+        .sort((a, b) => {
+          const ta = new Date(getField(a) ?? 0).getTime();
+          const tb = new Date(getField(b) ?? 0).getTime();
+          return ta - tb;
+        });
+
+      setDayDate(start);
+      setDayList(rows);
+    },
+    [baseFiltered, dateMode]
   );
 
+  const closeDayModal = () => {
+    setDayList(null);
+    setDayDate(null);
+  };
+
+  /* ===== Interacciones del calendario ===== */
   const onSelectEvent = useCallback(
     (e: CalendarEvent) => {
-      if (e.isOverflow && e.overflowEvents?.length) {
-        setOverflowList(e.overflowEvents);
-      } else {
-        nav(`/payments/${e.id}`);
-      }
+      // Siempre abrimos el modal del día (sea un pill normal o "+N más")
+      openDayModal(e.start);
     },
-    [nav]
+    [openDayModal]
+  );
+
+  // SlotInfo no siempre está tipado en todas las versiones, por eso any
+  const onSelectSlot = useCallback(
+    (slotInfo: any) => {
+      // slotInfo.start es el inicio del día/time range clickado
+      openDayModal(slotInfo.start as Date);
+    },
+    [openDayModal]
   );
 
   const onNavigate = useCallback((date: Date) => setViewDate(date), []);
@@ -699,7 +694,7 @@ export default function PaymentsCalendar() {
     []
   );
 
-  /* ===== Lista ===== */
+  /* ===== Lista (debajo) ===== */
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   const clearRange = () => {
@@ -724,9 +719,7 @@ export default function PaymentsCalendar() {
   const monthList = useMemo(() => {
     const defaultStart = startOfMonth(viewDate).getTime();
     const defaultEnd = endOfMonth(viewDate).getTime();
-    const rangeStart = fromDate
-      ? startOfDayLocal(fromDate).getTime()
-      : defaultStart;
+    const rangeStart = fromDate ? startOfDayLocal(fromDate).getTime() : defaultStart;
     const rangeEnd = toDate ? endOfDayLocal(toDate).getTime() : defaultEnd;
     const term = dqText.trim().toLowerCase();
 
@@ -741,13 +734,7 @@ export default function PaymentsCalendar() {
         }
         const t = new Date(selectedDate!).getTime();
         if (t < rangeStart || t > rangeEnd) return false;
-        if (
-          term &&
-          !String(p.title ?? "")
-            .toLowerCase()
-            .includes(term)
-        )
-          return false;
+        if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
         return true;
       })
       .sort((a, b) => {
@@ -890,10 +877,7 @@ export default function PaymentsCalendar() {
       )}
 
       {/* ===== Calendario + Toggle arriba ===== */}
-      <div
-        className="card"
-        style={{ padding: 0, opacity: bigLoaderVisible ? 0.35 : 1 }}
-      >
+      <div className="card" style={{ padding: 0, opacity: bigLoaderVisible ? 0.35 : 1 }}>
         <div
           style={{
             padding: "12px 14px",
@@ -908,8 +892,7 @@ export default function PaymentsCalendar() {
           <div>
             <strong>Calendario de pagos</strong>
             <span className="muted" style={{ marginLeft: 8 }}>
-              — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido ·
-              amarillo: pagado
+              — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido · amarillo: pagado
             </span>
             {fetchingPayments && (
               <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
@@ -934,8 +917,7 @@ export default function PaymentsCalendar() {
               title="Mostrar por fecha de vencimiento"
               style={{
                 padding: "6px 10px",
-                background:
-                  dateMode === "due" ? "var(--bg-soft)" : "transparent",
+                background: dateMode === "due" ? "var(--bg-soft)" : "transparent",
                 fontWeight: dateMode === "due" ? 800 : 600,
               }}
             >
@@ -948,8 +930,7 @@ export default function PaymentsCalendar() {
               title="Mostrar por fecha de pago realizado"
               style={{
                 padding: "6px 10px",
-                background:
-                  dateMode === "paid" ? "var(--bg-soft)" : "transparent",
+                background: dateMode === "paid" ? "var(--bg-soft)" : "transparent",
                 fontWeight: dateMode === "paid" ? 800 : 600,
                 borderLeft: "1px solid var(--border)",
               }}
@@ -973,6 +954,8 @@ export default function PaymentsCalendar() {
               views={[Views.MONTH, Views.WEEK, Views.DAY]}
               startAccessor="start"
               endAccessor="end"
+              selectable
+              onSelectSlot={onSelectSlot}
               onSelectEvent={onSelectEvent}
               onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
@@ -1010,6 +993,8 @@ export default function PaymentsCalendar() {
               views={[Views.MONTH, Views.WEEK, Views.DAY]}
               startAccessor="start"
               endAccessor="end"
+              selectable
+              onSelectSlot={onSelectSlot}
               onSelectEvent={onSelectEvent}
               onNavigate={setViewDate}
               eventPropGetter={eventPropGetter}
@@ -1040,10 +1025,7 @@ export default function PaymentsCalendar() {
       </div>
 
       {/* ===== Filtros ===== */}
-      <div
-        className="card"
-        style={{ marginTop: 12, opacity: bigLoaderVisible ? 0.35 : 1 }}
-      >
+      <div className="card" style={{ marginTop: 12, opacity: bigLoaderVisible ? 0.35 : 1 }}>
         <div className="card-sub" style={{ marginBottom: 8 }}>
           Filtros (afectan al calendario y a la lista)
         </div>
@@ -1060,11 +1042,7 @@ export default function PaymentsCalendar() {
             + Elegir equipos
           </button>
           {(usersSelected.length > 0 || teamsSelected.length > 0) && (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={clearFilters}
-            >
+            <button type="button" className="btn btn-ghost" onClick={clearFilters}>
               Limpiar filtros
             </button>
           )}
@@ -1078,9 +1056,7 @@ export default function PaymentsCalendar() {
                 <button
                   type="button"
                   onClick={() =>
-                    setTeamsSelected((prev) =>
-                      prev.filter((x) => x._id !== t._id)
-                    )
+                    setTeamsSelected((prev) => prev.filter((x) => x._id !== t._id))
                   }
                 >
                   ×
@@ -1094,11 +1070,7 @@ export default function PaymentsCalendar() {
           Usuario(s)
         </label>
         <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={() => setOpenUsers(true)}
-          >
+          <button type="button" className="btn btn-outline" onClick={() => setOpenUsers(true)}>
             + Elegir usuarios
           </button>
         </div>
@@ -1111,9 +1083,7 @@ export default function PaymentsCalendar() {
                 <button
                   type="button"
                   onClick={() =>
-                    setUsersSelected((prev) =>
-                      prev.filter((x) => x._id !== u._id)
-                    )
+                    setUsersSelected((prev) => prev.filter((x) => x._id !== u._id))
                   }
                 >
                   ×
@@ -1161,11 +1131,7 @@ export default function PaymentsCalendar() {
             style={{ width: 150 }}
           />
           {(fromDate || toDate) && (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={clearRange}
-            >
+            <button type="button" className="btn btn-ghost" onClick={clearRange}>
               Limpiar
             </button>
           )}
@@ -1174,21 +1140,11 @@ export default function PaymentsCalendar() {
 
       {/* ===== Lista ===== */}
       {!monthList.length ? (
-        <div
-          className="card"
-          style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}
-        >
+        <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
           No hay pagos con los filtros actuales.
         </div>
       ) : (
-        <div
-          className="card"
-          style={{
-            padding: 0,
-            marginTop: 8,
-            opacity: bigLoaderVisible ? 0.35 : 1,
-          }}
-        >
+        <div className="card" style={{ padding: 0, marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
           <div
             style={{
               display: "grid",
@@ -1217,9 +1173,7 @@ export default function PaymentsCalendar() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() =>
-                  setSortDue((p) => (p === "asc" ? "desc" : "asc"))
-                }
+                onClick={() => setSortDue((p) => (p === "asc" ? "desc" : "asc"))}
                 title={`Ordenar por ${dateHeaderLabel.toLowerCase()}`}
                 style={{ padding: "2px 6px", fontSize: 12 }}
               >
@@ -1237,9 +1191,7 @@ export default function PaymentsCalendar() {
                 style={{
                   padding: "2px 6px",
                   fontSize: 12,
-                  border: sortUnpaidFirst
-                    ? "1px solid var(--border)"
-                    : "1px solid transparent",
+                  border: sortUnpaidFirst ? "1px solid var(--border)" : "1px solid transparent",
                   borderRadius: 8,
                 }}
               >
@@ -1253,9 +1205,7 @@ export default function PaymentsCalendar() {
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {monthList.map((p) => {
               const dateStr =
-                dateMode === "paid"
-                  ? formatDateTime(p.paidAt)
-                  : formatDateTime(p.dueAt);
+                dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt);
 
               let badgeStyle: React.CSSProperties = {};
               let badgeText = "Pendiente";
@@ -1360,34 +1310,55 @@ export default function PaymentsCalendar() {
         />
       )}
 
-      {/* Modal con overflow de eventos del día */}
-      {overflowList && (
+      {/* Modal con pagos del día seleccionado */}
+      {dayList && (
         <ModalBase
-          title="Pagos de este día"
-          onClose={() => setOverflowList(null)}
+          title={`Pagos de este día${
+            dayDate ? ` — ${fmt(dayDate, "dd/MM/yyyy", { locale: es })}` : ""
+          }`}
+          onClose={closeDayModal}
         >
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {overflowList.map((e) => (
-              <li
-                key={e.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  padding: "10px 12px",
-                  borderTop: "1px solid var(--border)",
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>{e.title}</div>
-                <button
-                  className="btn btn-outline"
-                  onClick={() => nav(`/payments/${e.id}`)}
+          {!dayList.length ? (
+            <div className="muted" style={{ padding: 12 }}>
+              No hay pagos para este día con el modo seleccionado.
+            </div>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {dayList.map((p) => (
+                <li
+                  key={p._id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    borderTop: "1px solid var(--border)",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
                 >
-                  Abrir
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p.title}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {Intl.NumberFormat("es-AR", {
+                        style: "currency",
+                        currency: "ARS",
+                      }).format(p.amount)}
+                      {" · "}
+                      {dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt)}
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-outline"
+                    onClick={() => nav(`/payments/${p._id}`)}
+                  >
+                    Abrir
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </ModalBase>
       )}
     </Layout>
