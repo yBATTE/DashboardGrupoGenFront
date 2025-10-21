@@ -123,7 +123,7 @@ function buildExportRows(
     dateMode,
     rangeStart,
     rangeEnd,
-  }: { dateMode: "due" | "paid"; rangeStart: Date; rangeEnd: Date }
+  }: { dateMode: "due" | "paid" | "overdue"; rangeStart: Date; rangeEnd: Date }
 ) {
   const start = rangeStart.getTime();
   const end = rangeEnd.getTime();
@@ -132,12 +132,19 @@ function buildExportRows(
   const fmtD = (d?: string | Date | null) =>
     d ? fmt(new Date(d), "dd/MM/yyyy HH:mm", { locale: es }) : "";
 
+  const now = Date.now();
+
   return payments
     .filter((p) => {
+      // lógica base igual que antes, con filtro extra si "overdue"
       const ref = dateMode === "paid" ? p.paidAt : p.dueAt;
       if (!ref) return false;
       const t = new Date(ref).getTime();
-      return t >= start && t <= end;
+      if (t < start || t > end) return false;
+      if (dateMode === "paid") return p.status === "paid";
+      if (dateMode === "overdue")
+        return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now;
+      return true; // "due"
     })
     .map((p) => {
       const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
@@ -495,7 +502,8 @@ export default function PaymentsCalendar() {
   }, [payments, usersSelected, teamsSelected]);
 
   /* ===== Toggle global (impacta Calendario + Lista) ===== */
-  const [dateMode, setDateMode] = useState<"due" | "paid">("due");
+  type Mode = "due" | "paid" | "overdue";
+  const [dateMode, setDateMode] = useState<Mode>("due");
 
   /* ===== Eventos base (sin agrupar) ===== */
   const eventsBaseDue: CalendarEvent[] = useMemo(() => {
@@ -511,6 +519,18 @@ export default function PaymentsCalendar() {
     const rows = baseFiltered.filter((p) => p.status === "paid" && p.paidAt);
     return rows.map((p) => {
       const start = new Date(p.paidAt!);
+      const end = addHours(start, 1);
+      return { id: p._id, title: p.title, start, end, payment: p };
+    });
+  }, [baseFiltered]);
+
+  const eventsBaseOverdue: CalendarEvent[] = useMemo(() => {
+    const now = Date.now();
+    const rows = baseFiltered.filter(
+      (p) => p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now
+    );
+    return rows.map((p) => {
+      const start = new Date(p.dueAt!);
       const end = addHours(start, 1);
       return { id: p._id, title: p.title, start, end, payment: p };
     });
@@ -573,6 +593,10 @@ export default function PaymentsCalendar() {
     return view === Views.MONTH ? groupForMonth(eventsBasePaid) : eventsBasePaid;
   }, [eventsBasePaid, view]);
 
+  const eventsOverdue: CalendarEvent[] = useMemo(() => {
+    return view === Views.MONTH ? groupForMonth(eventsBaseOverdue) : eventsBaseOverdue;
+  }, [eventsBaseOverdue, view]);
+
   // estilos de eventos
   const eventPropGetter = useCallback((event: CalendarEvent) => {
     if (event.isOverflow) {
@@ -594,17 +618,17 @@ export default function PaymentsCalendar() {
     let border = "1px solid rgba(0,0,0,.08)";
 
     if (event.payment.status === "paid") {
-      bg = "#fef3c7";
+      bg = "#1a17ecff";
       color = "#111";
       border = "1px dashed #9CA3AF";
     } else if (event.payment.dueAt) {
       const hours = differenceInHours(new Date(event.payment.dueAt), now);
       if (hours < 0) {
-        bg = "#111827";
+        bg = "#ff1313ff";
         color = "#fff";
       } else if (hours <= 48) {
-        bg = "#fee2e2";
-        color = "#b91c1c";
+        bg = "#fffc46ff";
+        color = "#000000ff";
       } else {
         bg = "#dcfce7";
         color = "#065f46";
@@ -636,18 +660,40 @@ export default function PaymentsCalendar() {
       // Rango de ese día (local)
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
       const end   = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+      const nowTs = Date.now();
 
       const rows = (baseFiltered ?? [])
         .filter((p) => {
+          // modo "paid": sólo pagados
+          if (dateMode === "paid") {
+            if (p.status !== "paid" || !p.paidAt) return false;
+            const t = new Date(p.paidAt).getTime();
+            return t >= start.getTime() && t <= end.getTime();
+          }
+          // modo "overdue": sólo vencidos
+          if (dateMode === "overdue") {
+            if (!p.dueAt || p.status === "paid") return false;
+            const t = new Date(p.dueAt).getTime();
+            if (t >= start.getTime() && t <= end.getTime()) {
+              return t < nowTs;
+            }
+            return false;
+          }
+          // modo "due": como estaba
           const ref = getField(p);
           if (!ref) return false;
-          if (dateMode === "paid" && p.status !== "paid") return false;
           const t = new Date(ref).getTime();
           return t >= start.getTime() && t <= end.getTime();
         })
         .sort((a, b) => {
-          const ta = new Date(getField(a) ?? 0).getTime();
-          const tb = new Date(getField(b) ?? 0).getTime();
+          const ta =
+            dateMode === "paid"
+              ? new Date(a.paidAt ?? 0).getTime()
+              : new Date(a.dueAt ?? 0).getTime();
+          const tb =
+            dateMode === "paid"
+              ? new Date(b.paidAt ?? 0).getTime()
+              : new Date(b.dueAt ?? 0).getTime();
           return ta - tb;
         });
 
@@ -722,17 +768,29 @@ export default function PaymentsCalendar() {
     const rangeStart = fromDate ? startOfDayLocal(fromDate).getTime() : defaultStart;
     const rangeEnd = toDate ? endOfDayLocal(toDate).getTime() : defaultEnd;
     const term = dqText.trim().toLowerCase();
+    const nowTs = Date.now();
 
     const rows = (baseFiltered ?? [])
       .filter((p) => {
-        const selectedDate =
-          dateMode === "paid" ? p.paidAt ?? null : p.dueAt ?? null;
         if (dateMode === "paid") {
-          if (p.status !== "paid" || !selectedDate) return false;
-        } else {
-          if (!selectedDate) return false;
+          if (p.status !== "paid" || !p.paidAt) return false;
+          const t = new Date(p.paidAt).getTime();
+          if (t < rangeStart || t > rangeEnd) return false;
+          if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
+          return true;
         }
-        const t = new Date(selectedDate!).getTime();
+        if (dateMode === "overdue") {
+          if (!p.dueAt || p.status === "paid") return false;
+          const t = new Date(p.dueAt).getTime();
+          if (t < rangeStart || t > rangeEnd) return false;
+          if (t >= nowTs) return false;
+          if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
+          return true;
+        }
+        // "due"
+        const selectedDate = p.dueAt ?? null;
+        if (!selectedDate) return false;
+        const t = new Date(selectedDate).getTime();
         if (t < rangeStart || t > rangeEnd) return false;
         if (term && !String(p.title ?? "").toLowerCase().includes(term)) return false;
         return true;
@@ -766,13 +824,14 @@ export default function PaymentsCalendar() {
     dateMode,
   ]);
 
-  const dateHeaderLabel = dateMode === "paid" ? "Pagado" : "Vencimiento";
+  const dateHeaderLabel =
+    dateMode === "paid" ? "Pagado" : "Vencimiento";
 
   /* ===== Exportadores ===== */
   const fileBaseName = useMemo(
     () =>
       `Pagos_${fmt(monthStart, "yyyy-MM", { locale: es })}_${
-        dateMode === "paid" ? "pagados" : "vencimiento"
+        dateMode === "paid" ? "pagados" : dateMode === "overdue" ? "vencidos" : "vencimiento"
       }`,
     [monthStart, dateMode]
   );
@@ -892,7 +951,7 @@ export default function PaymentsCalendar() {
           <div>
             <strong>Calendario de pagos</strong>
             <span className="muted" style={{ marginLeft: 8 }}>
-              — rojo: vence ≤ 48 h · verde: &gt; 48 h · negro: vencido · amarillo: pagado
+              — amarillo: vence ≤ 48 h · verde: &gt; 48 h · rojo: vencido · azul: pagado
             </span>
             {fetchingPayments && (
               <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
@@ -937,12 +996,26 @@ export default function PaymentsCalendar() {
             >
               Pagado
             </button>
+            <button
+              type="button"
+              onClick={() => setDateMode("overdue")}
+              className="btn btn-ghost"
+              title="Mostrar solo los pagos vencidos"
+              style={{
+                padding: "6px 10px",
+                background: dateMode === "overdue" ? "var(--bg-soft)" : "transparent",
+                fontWeight: dateMode === "overdue" ? 800 : 600,
+                borderLeft: "1px solid var(--border)",
+              }}
+            >
+              Vencidos
+            </button>
           </div>
         </div>
 
         {/* Calendarios */}
         <div style={{ height: 600 }}>
-          {dateMode === "due" ? (
+          {dateMode === "due" && (
             <Calendar
               key="calendar-due"
               localizer={localizer}
@@ -981,7 +1054,9 @@ export default function PaymentsCalendar() {
                 showMore: (total) => `+${total} más`,
               }}
             />
-          ) : (
+          )}
+
+          {dateMode === "paid" && (
             <Calendar
               key="calendar-paid"
               localizer={localizer}
@@ -1014,6 +1089,47 @@ export default function PaymentsCalendar() {
                 next: "Siguiente",
                 allDay: "Todo el día",
                 noEventsInRange: "No hay pagos realizados en este rango",
+                date: "Fecha",
+                time: "Hora",
+                event: "Pago",
+                showMore: (total) => `+${total} más`,
+              }}
+            />
+          )}
+
+          {dateMode === "overdue" && (
+            <Calendar
+              key="calendar-overdue"
+              localizer={localizer}
+              culture="es"
+              events={eventsOverdue}
+              defaultView={Views.MONTH}
+              view={view}
+              onView={(v) => setView(v)}
+              views={[Views.MONTH, Views.WEEK, Views.DAY]}
+              startAccessor="start"
+              endAccessor="end"
+              selectable
+              onSelectSlot={onSelectSlot}
+              onSelectEvent={onSelectEvent}
+              onNavigate={setViewDate}
+              eventPropGetter={eventPropGetter}
+              components={{ toolbar: ModernToolbar, event: EventPill }}
+              popup
+              min={minTime}
+              max={maxTime}
+              step={30}
+              timeslots={2}
+              scrollToTime={scrollTo}
+              messages={{
+                month: "Mes",
+                week: "Semana",
+                day: "Día",
+                today: "Hoy",
+                previous: "Anterior",
+                next: "Siguiente",
+                allDay: "Todo el día",
+                noEventsInRange: "No hay pagos vencidos en este rango",
                 date: "Fecha",
                 time: "Hora",
                 event: "Pago",
@@ -1324,39 +1440,107 @@ export default function PaymentsCalendar() {
             </div>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {dayList.map((p) => (
-                <li
-                  key={p._id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    borderTop: "1px solid var(--border)",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {p.title}
-                    </div>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {Intl.NumberFormat("es-AR", {
-                        style: "currency",
-                        currency: "ARS",
-                      }).format(p.amount)}
-                      {" · "}
-                      {dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt)}
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-outline"
-                    onClick={() => nav(`/payments/${p._id}`)}
+              {dayList.map((p) => {
+                // === Colores iguales a los eventos ===
+                let left = "#e5e7eb"; // default
+                let chipBg = "#f3f4f6";
+                let chipColor = "#111827";
+                let chipText = "Pendiente";
+
+                if (p.status === "paid") {
+                  left = "#1a17ecff";
+                  chipBg = "#e0e7ff";
+                  chipColor = "#1f2937";
+                  chipText = "Pagado";
+                } else if (p.dueAt) {
+                  const hours = differenceInHours(new Date(p.dueAt), new Date());
+                  if (hours < 0) {
+                    left = "#ff1313ff";
+                    chipBg = "#fee2e2";
+                    chipColor = "#991b1b";
+                    chipText = "Vencido";
+                  } else if (hours <= 48) {
+                    left = "#fffc46ff";
+                    chipBg = "#fef9c3";
+                    chipColor = "#111827";
+                    chipText = "Vence ≤48h";
+                  } else {
+                    left = "#22c55e";
+                    chipBg = "#dcfce7";
+                    chipColor = "#065f46";
+                    chipText = "Futuro";
+                  }
+                }
+
+                return (
+                  <li
+                    key={p._id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "10px 12px",
+                      borderTop: "1px solid var(--border)",
+                      alignItems: "center",
+                      gap: 10,
+                      position: "relative",
+                    }}
                   >
-                    Abrir
-                  </button>
-                </li>
-              ))}
+                    {/* barrita de color a la izquierda */}
+                    <span
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 6,
+                        background: left,
+                        borderTopLeftRadius: 10,
+                        borderBottomLeftRadius: 10,
+                      }}
+                    />
+                    <div style={{ minWidth: 0, paddingLeft: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                          title={p.title}
+                        >
+                          {p.title}
+                        </div>
+                        <span
+                          className="badge"
+                          style={{
+                            background: chipBg,
+                            color: chipColor,
+                            border: "1px solid rgba(0,0,0,.08)",
+                          }}
+                        >
+                          {chipText}
+                        </span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {Intl.NumberFormat("es-AR", {
+                          style: "currency",
+                          currency: "ARS",
+                        }).format(p.amount)}
+                        {" · "}
+                        {dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt)}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-outline"
+                      onClick={() => nav(`/payments/${p._id}`)}
+                    >
+                      Abrir
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </ModalBase>
