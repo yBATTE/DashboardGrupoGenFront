@@ -7,7 +7,8 @@ export type BasicUser = {
   name?: string;
   lastName?: string;      // 👈
   email?: string;
-  displayName?: string;   // si lo mandás desde el server
+  displayName?: string;
+  provisionalPassword?: string;   // si lo mandás desde el server
 };
 
 

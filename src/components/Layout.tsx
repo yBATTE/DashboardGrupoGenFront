@@ -2,6 +2,7 @@ import { NavLink, useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 import { api } from "../api/axios";
 import ProfileFab from "./ProfileFab";
+import NotificationBell from "./NotificationBell"; // 👈 NUEVO
 
 export default function Layout({
   title,
@@ -18,6 +19,9 @@ export default function Layout({
       ? (s as any).isMember()
       : Boolean((s as any).roles?.includes?.("member"))
   );
+    const isAuthed = useAuthStore((s) =>
+    Boolean((s as any).user?._id || (s as any).roles?.length || (s as any).email)
+  );
   const nav = useNavigate();
 
   async function logout() {
@@ -32,87 +36,52 @@ export default function Layout({
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        {/* Marca clickeable al home */}
         <Link to="/" className="brand" title="Ir al inicio">
           Grupo Gen Dashboard
         </Link>
 
         <nav className="nav">
-          {/* ✅ Inicio apunta a "/" y sólo está activo en el home */}
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) => (isActive ? "active" : "")}
-          >
+          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
             Inicio
           </NavLink>
 
-          {/* ✅ Tablero Tareas ahora en /tasks (sin end para quedar activo también en /tasks/:id) */}
-          <NavLink
-            to="/tasks"
-            className={({ isActive }) => (isActive ? "active" : "")}
-          >
+          <NavLink to="/tasks" className={({ isActive }) => (isActive ? "active" : "")}>
             Tablero Tareas
           </NavLink>
 
           {(isAdmin || isMember) && (
-            <NavLink
-              to="/new"
-              end
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
+            <NavLink to="/new" end className={({ isActive }) => (isActive ? "active" : "")}>
               Nueva tarea
             </NavLink>
           )}
 
           {(isAdmin || isMember) && (
-            <NavLink
-              to="/payments"
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
+            <NavLink to="/payments" className={({ isActive }) => (isActive ? "active" : "")}>
               Tablero Pagos
             </NavLink>
           )}
 
           {(isAdmin || isMember) && (
-            <NavLink
-              to="/new/payments"
-              end
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
+            <NavLink to="/new/payments" end className={({ isActive }) => (isActive ? "active" : "")}>
               Nuevo Pago
             </NavLink>
           )}
 
           {isAdmin && (
             <>
-              <NavLink
-                to="/teams"
-                end
-                className={({ isActive }) => (isActive ? "active" : "")}
-              >
+              <NavLink to="/teams" end className={({ isActive }) => (isActive ? "active" : "")}>
                 Crear equipo
               </NavLink>
 
-              <NavLink
-                to="/teams/manage"
-                className={({ isActive }) => (isActive ? "active" : "")}
-              >
+              <NavLink to="/teams/manage" className={({ isActive }) => (isActive ? "active" : "")}>
                 Administrar equipos
               </NavLink>
 
-              <NavLink
-                to="/users"
-                end
-                className={({ isActive }) => (isActive ? "active" : "")}
-              >
+              <NavLink to="/users" end className={({ isActive }) => (isActive ? "active" : "")}>
                 Crear usuario
               </NavLink>
 
-              <NavLink
-                to="/admin/users"
-                className={({ isActive }) => (isActive ? "active" : "")}
-              >
+              <NavLink to="/admin/users" className={({ isActive }) => (isActive ? "active" : "")}>
                 Usuarios
               </NavLink>
             </>
@@ -123,7 +92,12 @@ export default function Layout({
       <div className="main">
         <div className="topbar">
           <div style={{ fontWeight: 800 }}>{title}</div>
-          {actions ? <div className="btn-row">{actions}</div> : null}
+
+          {/* derecha: acciones + campana */}
+          <div className="btn-row" style={{ alignItems: "center", gap: 8 }}>
+            {actions ? <div className="btn-row">{actions}</div> : null}
+            <NotificationBell enabled={isAuthed} /> {/* 👈 NUEVO */}
+          </div>
         </div>
 
         <div className="page">{children}</div>

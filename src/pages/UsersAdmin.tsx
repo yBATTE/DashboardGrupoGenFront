@@ -6,6 +6,14 @@ import { createUser } from '../api/users';
 
 type Role = 'member' | 'admin';
 
+interface CreateUserResponse {
+  _id: string;
+  name: string | null;
+  email: string;
+  roles: Role[];
+  provisionalPassword: string; // <-- lo que devuelve tu backend
+}
+
 export default function UsersAdmin() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName]   = useState('');
@@ -14,18 +22,20 @@ export default function UsersAdmin() {
 
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: (payload: {
       name: string;
       email: string;
       role?: Role;
-      lastName?: string; // opcional para futuros usos en backend
+      lastName?: string;
     }) => createUser(payload),
-    onSuccess: () => {
+    onSuccess: (data: CreateUserResponse) => {
       setOk(true);
       setErr(null);
-      // Si querés limpiar los campos:
+      setGeneratedPassword(data.provisionalPassword); // <-- guardamos la pass
+      // si querés limpiar el formulario:
       // setFirstName(''); setLastName(''); setEmail(''); setRole('member');
     },
     onError: (e: any) => {
@@ -35,13 +45,13 @@ export default function UsersAdmin() {
         'Error al crear el usuario';
       setErr(Array.isArray(msg) ? msg.join(', ') : String(msg));
       setOk(false);
+      setGeneratedPassword(null);
     },
   });
 
   const isValidEmail = (v: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
-  // Hacemos obligatorio el nombre y el email. El apellido puede quedar opcional.
   const canSubmit = Boolean(
     firstName.trim() && isValidEmail(email) && (role === 'member' || role === 'admin')
   );
@@ -54,10 +64,11 @@ export default function UsersAdmin() {
     }
     setOk(false);
     setErr(null);
+    setGeneratedPassword(null);
 
     mutation.mutate({
-      name: firstName,              // mantiene compat con backend actual
-      lastName: lastName || undefined,   // se envía si existe
+      name: firstName,
+      lastName: lastName || undefined,
       email: email.trim().toLowerCase(),
       role,
     });
@@ -108,8 +119,8 @@ export default function UsersAdmin() {
         </select>
 
         <div className="muted" style={{ marginTop: 10 }}>
-          Se generará una contraseña aleatoria y se enviará por email al usuario,
-          junto con el enlace de acceso.
+          Se generará una contraseña provisional y se mostrará aquí para que se la
+          compartas al usuario. No se enviará ningún email automático.
         </div>
 
         {err && (
@@ -134,12 +145,21 @@ export default function UsersAdmin() {
               background: '#f3fff6',
             }}
           >
-            Usuario creado. Se envió la contraseña por email.
+            <div>Usuario creado correctamente.</div>
+            {generatedPassword && (
+              <div style={{ marginTop: 8 }}>
+                <strong>Contraseña provisional:</strong>{' '}
+                <code>{generatedPassword}</code>
+              </div>
+            )}
           </div>
         )}
 
         <div className="btn-row" style={{ marginTop: 16 }}>
-          <button className="btn btn-primary" disabled={mutation.isPending || !canSubmit}>
+          <button
+            className="btn btn-primary"
+            disabled={mutation.isPending || !canSubmit}
+          >
             {mutation.isPending ? 'Creando…' : 'Crear usuario'}
           </button>
         </div>

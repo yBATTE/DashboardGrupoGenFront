@@ -20,6 +20,7 @@ import NewPayment from "./pages/NewPayment";
 import PaymentDetail from "./pages/PaymentDetail";
 import ForgotMyPassword from "./pages/ForgotMyPassword";
 import Home from "./pages/Home";
+import NotificationsHistory from "./pages/NotificationsHistory";
 
 export default function App() {
   return (
@@ -50,7 +51,9 @@ export default function App() {
 
           {/* privadas (usando RequireAuth como wrapper tal como lo tenías) */}
           {/* home / dashboard */}
-            <Route path="/" element={
+          <Route
+            path="/"
+            element={
               <RequireAuth>
                 <Home />
               </RequireAuth>
@@ -147,6 +150,15 @@ export default function App() {
               <RequireAuth>
                 <PaymentDetail />
               </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/notifications/history"
+            element={
+              <RequireAuth>
+            <NotificationsHistory />
+            </RequireAuth>
             }
           />
 
