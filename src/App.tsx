@@ -1,14 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-import TasksBoard from "./pages/TasksBoard";
 import Login from "./pages/Login";
-import NewTask from "./pages/NewTask";
 import TeamsPage from "./pages/Teams";
 import TeamsManage from "./pages/TeamsManage";
 import UsersAdmin from "./pages/UsersAdmin";
 import AdminUsersList from "./pages/AdminUsersList";
 import AdminUserDetail from "./pages/AdminUserDetail";
-import TaskDetail from "./pages/TaskDetail";
 
 import RequireAuth from "./components/RequiereAuth"; // ✅ ojo: nombre y ruta corregidos
 import PublicOnly from "./components/PublicOnly";
@@ -61,22 +58,6 @@ export default function App() {
           />
           {/* tareas */}
           <Route
-            path="/tasks"
-            element={
-              <RequireAuth>
-                <TasksBoard />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/new"
-            element={
-              <RequireAuth>
-                <NewTask />
-              </RequireAuth>
-            }
-          />
-          <Route
             path="/teams"
             element={
               <RequireAuth>
@@ -118,15 +99,6 @@ export default function App() {
               </RequireAuth>
             }
           />
-          <Route
-            path="/tasks/:id"
-            element={
-              <RequireAuth>
-                <TaskDetail />
-              </RequireAuth>
-            }
-          />
-
           {/* pagos */}
           <Route
             path="/payments"

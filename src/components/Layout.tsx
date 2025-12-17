@@ -19,9 +19,11 @@ export default function Layout({
       ? (s as any).isMember()
       : Boolean((s as any).roles?.includes?.("member"))
   );
-    const isAuthed = useAuthStore((s) =>
+
+  const isAuthed = useAuthStore((s) =>
     Boolean((s as any).user?._id || (s as any).roles?.length || (s as any).email)
   );
+
   const nav = useNavigate();
 
   async function logout() {
@@ -45,16 +47,6 @@ export default function Layout({
             Inicio
           </NavLink>
 
-          <NavLink to="/tasks" className={({ isActive }) => (isActive ? "active" : "")}>
-            Tablero Tareas
-          </NavLink>
-
-          {(isAdmin || isMember) && (
-            <NavLink to="/new" end className={({ isActive }) => (isActive ? "active" : "")}>
-              Nueva tarea
-            </NavLink>
-          )}
-
           {(isAdmin || isMember) && (
             <NavLink to="/payments" className={({ isActive }) => (isActive ? "active" : "")}>
               Tablero Pagos
@@ -62,17 +54,25 @@ export default function Layout({
           )}
 
           {(isAdmin || isMember) && (
-            <NavLink to="/new/payments" end className={({ isActive }) => (isActive ? "active" : "")}>
+            <NavLink
+              to="/new/payments"
+              end
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
               Nuevo Pago
             </NavLink>
           )}
 
+          {/* ✅ AHORA: Admin + Member pueden crear equipo */}
+          {(isAdmin || isMember) && (
+            <NavLink to="/teams" end className={({ isActive }) => (isActive ? "active" : "")}>
+              Crear equipo
+            </NavLink>
+          )}
+
+          {/* ✅ SOLO ADMIN: administración */}
           {isAdmin && (
             <>
-              <NavLink to="/teams" end className={({ isActive }) => (isActive ? "active" : "")}>
-                Crear equipo
-              </NavLink>
-
               <NavLink to="/teams/manage" className={({ isActive }) => (isActive ? "active" : "")}>
                 Administrar equipos
               </NavLink>
@@ -96,7 +96,7 @@ export default function Layout({
           {/* derecha: acciones + campana */}
           <div className="btn-row" style={{ alignItems: "center", gap: 8 }}>
             {actions ? <div className="btn-row">{actions}</div> : null}
-            <NotificationBell enabled={isAuthed} /> {/* 👈 NUEVO */}
+            <NotificationBell enabled={isAuthed} />
           </div>
         </div>
 

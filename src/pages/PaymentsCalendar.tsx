@@ -1,3 +1,4 @@
+// PaymentsCalendar.tsx
 import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ import * as XLSX from "xlsx";
 
 import { listPayments, Payment } from "../api/payments";
 import { listTeams, Team } from "../api/teams";
-import { searchUsers, BasicUser, getMe } from "../api/users";
+import { getMe } from "../api/users";
 
 /* ===== Localizer (ES) ===== */
 const locales = { es };
@@ -46,10 +47,7 @@ const SHEET_URL_DAY =
 function fullName(u: any): string {
   if (!u) return "—";
   if (typeof u === "string") return u;
-  const composed = [u.name, (u as any).lastName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
+  const composed = [u.name, (u as any).lastName].filter(Boolean).join(" ").trim();
   return (u as any).displayName || composed || u.email || u._id || "—";
 }
 function displayUser(u: any): string {
@@ -98,25 +96,48 @@ function PageLoader({
       }}
     >
       <div style={{ display: "grid", gap: 12, placeItems: "center" }}>
-        <svg width="48" height="48" viewBox="0 0 24 24" role="img" aria-label="cargando">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.15" />
-          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" fill="none">
-            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+        <svg
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          role="img"
+          aria-label="cargando"
+        >
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+            fill="none"
+            opacity="0.15"
+          />
+          <path
+            d="M22 12a10 10 0 0 0-10-10"
+            stroke="currentColor"
+            strokeWidth="4"
+            fill="none"
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 12 12"
+              to="360 12 12"
+              dur="0.8s"
+              repeatCount="indefinite"
+            />
           </path>
         </svg>
         <div style={{ fontWeight: 800 }}>{text}</div>
-        <div style={{ fontSize: 12, color: "#6b7280" }}>Preparando calendario y lista de pagos…</div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>
+          Preparando calendario y lista de pagos…
+        </div>
       </div>
     </div>
   );
 }
 
 /* ===== Helpers de exportación (XLSX/CSV) ===== */
-function fmtDate(iso?: string | null) {
-  return iso ? fmt(new Date(iso), "dd/MM/yyyy HH:mm", { locale: es }) : "";
-}
-
-/** dateMode soporta: "due" | "paid" | "overdue" | "upcoming" */
 function buildExportRows(
   payments: Payment[],
   {
@@ -142,11 +163,12 @@ function buildExportRows(
       if (t < start || t > end) return false;
 
       if (dateMode === "paid") return p.status === "paid";
-      if (dateMode === "overdue") return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now;
-      if (dateMode === "upcoming") return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() >= now;
+      if (dateMode === "overdue")
+        return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() < now;
+      if (dateMode === "upcoming")
+        return p.status !== "paid" && p.dueAt && new Date(p.dueAt).getTime() >= now;
 
-      // "due" -> sin filtro extra
-      return true;
+      return true; // "due"
     })
     .map((p) => {
       const refDate = dateMode === "paid" ? p.paidAt : p.dueAt;
@@ -165,11 +187,7 @@ function buildExportRows(
     });
 }
 
-function downloadRows(
-  rows: any[],
-  filenameBase: string,
-  format: "xlsx" | "csv" = "xlsx"
-) {
+function downloadRows(rows: any[], filenameBase: string, format: "xlsx" | "csv" = "xlsx") {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Pagos");
@@ -186,7 +204,6 @@ type CalendarEvent = {
   start: Date;
   end: Date;
   payment: Payment;
-  /** synthetic overflow “+N más” */
   isOverflow?: boolean;
   overflowEvents?: CalendarEvent[];
 };
@@ -260,9 +277,15 @@ const ModernToolbar: React.FC<ToolbarProps<CalendarEvent, object>> = ({
           overflow: "hidden",
         }}
       >
-        <SegBtn active={view === "month"} onClick={() => onView("month" as View)}>Mes</SegBtn>
-        <SegBtn active={view === "week"} onClick={() => onView("week" as View)}>Semana</SegBtn>
-        <SegBtn active={view === "day"} onClick={() => onView("day" as View)}>Día</SegBtn>
+        <SegBtn active={view === "month"} onClick={() => onView("month" as View)}>
+          Mes
+        </SegBtn>
+        <SegBtn active={view === "week"} onClick={() => onView("week" as View)}>
+          Semana
+        </SegBtn>
+        <SegBtn active={view === "day"} onClick={() => onView("day" as View)}>
+          Día
+        </SegBtn>
       </div>
     </div>
   );
@@ -281,9 +304,7 @@ const EventPill: React.FC<EventProps<CalendarEvent>> = ({ event }) => {
         borderRadius: 12,
         fontWeight: 800,
         boxShadow: "0 2px 8px rgba(0,0,0,.06)",
-        border: isOverflow
-          ? "1px solid rgba(0,0,0,.15)"
-          : "1px dashed rgba(0,0,0,.15)",
+        border: isOverflow ? "1px solid rgba(0,0,0,.15)" : "1px dashed rgba(0,0,0,.15)",
         background: isOverflow ? "#f3f4f6" : undefined,
       }}
       title={event?.payment?.description || event?.title}
@@ -302,13 +323,7 @@ const EventPill: React.FC<EventProps<CalendarEvent>> = ({ event }) => {
 };
 
 /* ===== Dropdown simple ===== */
-function Dropdown({
-  label,
-  children,
-}: {
-  label: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function Dropdown({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -434,7 +449,7 @@ export default function PaymentsCalendar() {
     staleTime: 10_000,
   });
 
-  // equipos (picker)
+  // equipos
   const {
     data: teamsData,
     isLoading: loadingTeams,
@@ -446,13 +461,7 @@ export default function PaymentsCalendar() {
   });
 
   // ===== Usuario actual (rol) =====
-  type Me = {
-    _id: string;
-    name?: string;
-    lastName?: string;
-    email: string;
-    roles?: string[];
-  };
+  type Me = { _id: string; name?: string; lastName?: string; email: string; roles?: string[] };
   const { data: me, isLoading: loadingMe } = useQuery<Me>({
     queryKey: ["me"],
     queryFn: getMe,
@@ -461,47 +470,55 @@ export default function PaymentsCalendar() {
   const isAdmin = !!me?.roles?.some((r) => String(r).toLowerCase() === "admin");
 
   // Loader overlay visible en primera carga
-  const bigLoaderVisible =
-    (loadingPayments || loadingTeams || loadingMe) && !payments;
+  const bigLoaderVisible = (loadingPayments || loadingTeams || loadingMe) && !payments;
 
-  /* ===== Filtros ===== */
+  /* ===== Filtro obligatorio por Equipo(s) con “Tema principal + +” ===== */
   const [teamsSelected, setTeamsSelected] = useState<Team[]>([]);
-  const [usersSelected, setUsersSelected] = useState<BasicUser[]>([]);
-  const [openTeams, setOpenTeams] = useState(false);
-  const [openUsers, setOpenUsers] = useState(false);
 
-  function clearFilters() {
+  // modal 1: elegir tema principal (SINGLE)
+  const [openTopicSingle, setOpenTopicSingle] = useState(false);
+
+  // modal 2: agregar/quitar más temas (MULTI)
+  const [openTeamsManage, setOpenTeamsManage] = useState(false);
+
+  const topicReady = teamsSelected.length > 0;
+
+  // auto-abrir selector SOLO si no hay tema (una vez)
+  const promptedRef = useRef(false);
+  useEffect(() => {
+    if (promptedRef.current) return;
+    if (loadingTeams || errTeams) return;
+    if (!topicReady) {
+      promptedRef.current = true;
+      setOpenTopicSingle(true);
+    }
+  }, [loadingTeams, errTeams, topicReady]);
+
+  function clearTeams() {
     setTeamsSelected([]);
-    setUsersSelected([]);
+    setOpenTopicSingle(true);
   }
 
-  // aplicar filtros base
-  const baseFiltered = useMemo(() => {
-    let rows = (payments ?? []) as Payment[];
+  // label: muestra principal + “+N”
+  const selectedTeamsLabel = useMemo(() => {
+    if (!teamsSelected.length) return "Elegí tema…";
+    if (teamsSelected.length === 1) return teamsSelected[0].name;
+    return `${teamsSelected[0].name} +${teamsSelected.length - 1}`;
+  }, [teamsSelected]);
 
-    const hasUser = (p: any, userId: string) => {
-      const arr = Array.isArray(p.assigneeIds) ? p.assigneeIds : [];
-      return arr.some((x: any) =>
-        typeof x === "string" ? x === userId : x?._id === userId
-      );
-    };
+  // aplicar filtro base (SOLO equipos). Si no hay equipos, no mostramos nada.
+  const baseFiltered = useMemo(() => {
+    const rows = (payments ?? []) as Payment[];
+    if (!teamsSelected.length) return [];
+
     const hasTeam = (p: any, teamId: string) => {
       const arr = Array.isArray(p.teamIds) ? p.teamIds : [];
-      return arr.some((x: any) =>
-        typeof x === "string" ? x === teamId : x?._id === teamId
-      );
+      return arr.some((x: any) => (typeof x === "string" ? x === teamId : x?._id === teamId));
     };
 
-    if (usersSelected.length) {
-      const uids = usersSelected.map((u) => u._id);
-      rows = rows.filter((p) => uids.some((uid) => hasUser(p, uid)));
-    }
-    if (teamsSelected.length) {
-      const tids = teamsSelected.map((t) => t._id);
-      rows = rows.filter((p) => tids.some((tid) => hasTeam(p, tid)));
-    }
-    return rows;
-  }, [payments, usersSelected, teamsSelected]);
+    const tids = teamsSelected.map((t) => t._id);
+    return rows.filter((p) => tids.some((tid) => hasTeam(p, tid)));
+  }, [payments, teamsSelected]);
 
   /* ===== Toggle global (impacta Calendario + Lista) ===== */
   type Mode = "due" | "paid" | "overdue" | "upcoming";
@@ -550,7 +567,7 @@ export default function PaymentsCalendar() {
     });
   }, [baseFiltered]);
 
-  /* ===== Agrupar por día en vista MONTH (máx. 2 visibles + “+N más”) ===== */
+  /* ===== Agrupar por día en vista MONTH (máx. 1 visible + “+N más”) ===== */
   function groupForMonth(events: CalendarEvent[]): CalendarEvent[] {
     const keyOf = (d: Date) => fmt(d, "yyyy-MM-dd");
     const byDay = new Map<string, CalendarEvent[]>();
@@ -565,9 +582,7 @@ export default function PaymentsCalendar() {
     const out: CalendarEvent[] = [];
 
     for (const [k, arrRaw] of byDay.entries()) {
-      const arr = arrRaw
-        .slice()
-        .sort((a, b) => a.start.getTime() - b.start.getTime());
+      const arr = arrRaw.slice().sort((a, b) => a.start.getTime() - b.start.getTime());
 
       if (arr.length <= 1) {
         out.push(...arr);
@@ -583,12 +598,7 @@ export default function PaymentsCalendar() {
         title: `+${rest.length} más`,
         start: new Date(yy, mm - 1, dd, 12, 0, 0, 0),
         end: new Date(yy, mm - 1, dd, 12, 30, 0, 0),
-        payment: {
-          _id: `overflow-${k}`,
-          title: "",
-          amount: 0,
-          status: "pending",
-        } as any,
+        payment: { _id: `overflow-${k}`, title: "", amount: 0, status: "pending" } as any,
         isOverflow: true,
         overflowEvents: rest,
       };
@@ -599,21 +609,37 @@ export default function PaymentsCalendar() {
     return out;
   }
 
-  const eventsDue: CalendarEvent[] = useMemo(() => {
-    return view === Views.MONTH ? groupForMonth(eventsBaseDue) : eventsBaseDue;
-  }, [eventsBaseDue, view]);
+  const eventsDue: CalendarEvent[] = useMemo(
+    () => (view === Views.MONTH ? groupForMonth(eventsBaseDue) : eventsBaseDue),
+    [eventsBaseDue, view]
+  );
+  const eventsPaid: CalendarEvent[] = useMemo(
+    () => (view === Views.MONTH ? groupForMonth(eventsBasePaid) : eventsBasePaid),
+    [eventsBasePaid, view]
+  );
+  const eventsOverdue: CalendarEvent[] = useMemo(
+    () => (view === Views.MONTH ? groupForMonth(eventsBaseOverdue) : eventsBaseOverdue),
+    [eventsBaseOverdue, view]
+  );
+  const eventsUpcoming: CalendarEvent[] = useMemo(
+    () => (view === Views.MONTH ? groupForMonth(eventsBaseUpcoming) : eventsBaseUpcoming),
+    [eventsBaseUpcoming, view]
+  );
 
-  const eventsPaid: CalendarEvent[] = useMemo(() => {
-    return view === Views.MONTH ? groupForMonth(eventsBasePaid) : eventsBasePaid;
-  }, [eventsBasePaid, view]);
+  const calendarEvents = useMemo(() => {
+    if (dateMode === "paid") return eventsPaid;
+    if (dateMode === "overdue") return eventsOverdue;
+    if (dateMode === "upcoming") return eventsUpcoming;
+    return eventsDue;
+  }, [dateMode, eventsDue, eventsPaid, eventsOverdue, eventsUpcoming]);
 
-  const eventsOverdue: CalendarEvent[] = useMemo(() => {
-    return view === Views.MONTH ? groupForMonth(eventsBaseOverdue) : eventsBaseOverdue;
-  }, [eventsBaseOverdue, view]);
-
-  const eventsUpcoming: CalendarEvent[] = useMemo(() => {
-    return view === Views.MONTH ? groupForMonth(eventsBaseUpcoming) : eventsBaseUpcoming;
-  }, [eventsBaseUpcoming, view]);
+  const noEventsMessage = useMemo(() => {
+    if (!topicReady) return "Elegí un equipo para ver pagos";
+    if (dateMode === "paid") return "No hay pagos realizados en este rango";
+    if (dateMode === "overdue") return "No hay pagos vencidos en este rango";
+    if (dateMode === "upcoming") return "No hay pagos pendientes en fecha en este rango";
+    return "No hay pagos en este rango";
+  }, [dateMode, topicReady]);
 
   // estilos de eventos
   const eventPropGetter = useCallback((event: CalendarEvent) => {
@@ -672,7 +698,7 @@ export default function PaymentsCalendar() {
   const openDayModal = useCallback(
     (date: Date) => {
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-      const end   = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+      const end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
       const nowTs = Date.now();
 
       const rows = (baseFiltered ?? [])
@@ -725,31 +751,23 @@ export default function PaymentsCalendar() {
   /* ===== Interacciones del calendario ===== */
   const onSelectEvent = useCallback(
     (e: CalendarEvent) => {
+      if (!topicReady) return;
       openDayModal(e.start);
     },
-    [openDayModal]
+    [openDayModal, topicReady]
   );
 
   const onSelectSlot = useCallback(
     (slotInfo: any) => {
+      if (!topicReady) return;
       openDayModal(slotInfo.start as Date);
     },
-    [openDayModal]
+    [openDayModal, topicReady]
   );
 
-  const onNavigate = useCallback((date: Date) => setViewDate(date), []);
-  const minTime = useMemo(
-    () => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0),
-    []
-  );
-  const maxTime = useMemo(
-    () => setSeconds(setMinutes(setHours(new Date(), 18), 0), 0),
-    []
-  );
-  const scrollTo = useMemo(
-    () => setSeconds(setMinutes(setHours(new Date(), 8), 0), 0),
-    []
-  );
+  const minTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0), []);
+  const maxTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 18), 0), 0), []);
+  const scrollTo = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 8), 0), 0), []);
 
   /* ===== Lista (debajo) ===== */
   const [fromDate, setFromDate] = useState<string>("");
@@ -764,16 +782,10 @@ export default function PaymentsCalendar() {
 
   const [sortDue, setSortDue] = useState<"asc" | "desc">("asc");
   const [sortUnpaidFirst, setSortUnpaidFirst] = useState(false);
-  const toggleDueSort = () =>
-    setSortDue((prev) => (prev === "asc" ? "desc" : "asc"));
-  const toggleUnpaidFirst = () =>
-    setSortUnpaidFirst((prev) => {
-      const next = !prev;
-      if (!next) setSortDue("asc");
-      return next;
-    });
 
   const monthList = useMemo(() => {
+    if (!topicReady) return [];
+
     const defaultStart = startOfMonth(viewDate).getTime();
     const defaultEnd = endOfMonth(viewDate).getTime();
     const rangeStart = fromDate ? startOfDayLocal(fromDate).getTime() : defaultStart;
@@ -832,19 +844,9 @@ export default function PaymentsCalendar() {
       });
 
     return rows;
-  }, [
-    baseFiltered,
-    viewDate,
-    sortDue,
-    sortUnpaidFirst,
-    fromDate,
-    toDate,
-    dqText,
-    dateMode,
-  ]);
+  }, [baseFiltered, viewDate, sortDue, sortUnpaidFirst, fromDate, toDate, dqText, dateMode, topicReady]);
 
-  const dateHeaderLabel =
-    dateMode === "paid" ? "Pagado" : "Vencimiento";
+  const dateHeaderLabel = dateMode === "paid" ? "Pagado" : "Vencimiento";
 
   /* ===== Exportadores ===== */
   const fileBaseName = useMemo(
@@ -861,47 +863,31 @@ export default function PaymentsCalendar() {
     [monthStart, dateMode]
   );
 
+  const ensureTopicOrOpen = useCallback(() => {
+    if (topicReady) return true;
+    setOpenTopicSingle(true);
+    return false;
+  }, [topicReady]);
+
   const exportMonth = useCallback(
     (format: "xlsx" | "csv" = "xlsx") => {
-      const rows = buildExportRows(baseFiltered, {
-        dateMode,
-        rangeStart: monthStart,
-        rangeEnd: monthEnd,
-      });
+      if (!ensureTopicOrOpen()) return;
+      const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: monthStart, rangeEnd: monthEnd });
       downloadRows(rows, fileBaseName, format);
     },
-    [baseFiltered, dateMode, monthStart, monthEnd, fileBaseName]
+    [ensureTopicOrOpen, baseFiltered, dateMode, monthStart, monthEnd, fileBaseName]
   );
 
   const exportDay = useCallback(
     (format: "xlsx" | "csv" = "xlsx") => {
-      const start = new Date(
-        viewDate.getFullYear(),
-        viewDate.getMonth(),
-        viewDate.getDate(),
-        0,
-        0,
-        0,
-        0
-      );
-      const end = new Date(
-        viewDate.getFullYear(),
-        viewDate.getMonth(),
-        viewDate.getDate(),
-        23,
-        59,
-        59,
-        999
-      );
-      const rows = buildExportRows(baseFiltered, {
-        dateMode,
-        rangeStart: start,
-        rangeEnd: end,
-      });
+      if (!ensureTopicOrOpen()) return;
+      const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 0, 0, 0, 0);
+      const end = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 23, 59, 59, 999);
+      const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: start, rangeEnd: end });
       const base = `${fileBaseName}_${fmt(viewDate, "yyyy-MM-dd")}`;
       downloadRows(rows, base, format);
     },
-    [baseFiltered, dateMode, viewDate, fileBaseName]
+    [ensureTopicOrOpen, baseFiltered, dateMode, viewDate, fileBaseName]
   );
 
   return (
@@ -909,34 +895,24 @@ export default function PaymentsCalendar() {
       title="Pagos"
       actions={
         <div className="btn-row">
-          {/* Menú: Excel por mes */}
           <Dropdown label="📊 Excel por mes">
             {isAdmin && (
               <DropdownItem href={SHEET_URL} newTab>
                 🔗 Ver online
               </DropdownItem>
             )}
-            <DropdownItem onClick={() => exportMonth("xlsx")}>
-              ⬇️ Descargar .xlsx
-            </DropdownItem>
-            <DropdownItem onClick={() => exportMonth("csv")}>
-              ⬇️ Descargar .csv
-            </DropdownItem>
+            <DropdownItem onClick={() => exportMonth("xlsx")}>⬇️ Descargar .xlsx</DropdownItem>
+            <DropdownItem onClick={() => exportMonth("csv")}>⬇️ Descargar .csv</DropdownItem>
           </Dropdown>
 
-          {/* Menú: Excel por día */}
           <Dropdown label="📅 Excel por día">
             {isAdmin && (
               <DropdownItem href={SHEET_URL_DAY} newTab>
                 🔗 Ver online
               </DropdownItem>
             )}
-            <DropdownItem onClick={() => exportDay("xlsx")}>
-              ⬇️ Descargar .xlsx (día)
-            </DropdownItem>
-            <DropdownItem onClick={() => exportDay("csv")}>
-              ⬇️ Descargar .csv (día)
-            </DropdownItem>
+            <DropdownItem onClick={() => exportDay("xlsx")}>⬇️ Descargar .xlsx (día)</DropdownItem>
+            <DropdownItem onClick={() => exportDay("csv")}>⬇️ Descargar .csv (día)</DropdownItem>
           </Dropdown>
 
           <Link to="/new/payments" className="btn btn-primary">
@@ -945,14 +921,10 @@ export default function PaymentsCalendar() {
         </div>
       }
     >
-      {/* Overlay inicial */}
       <PageLoader visible={bigLoaderVisible} />
 
       {errorPayments && (
-        <div
-          className="card"
-          style={{ borderColor: "var(--danger)", background: "#fff4f4" }}
-        >
+        <div className="card" style={{ borderColor: "var(--danger)", background: "#fff4f4" }}>
           Error.{" "}
           <button className="btn btn-ghost" onClick={() => refetch()}>
             Reintentar
@@ -960,334 +932,258 @@ export default function PaymentsCalendar() {
         </div>
       )}
 
-      {/* ===== Calendario + Toggle arriba ===== */}
+      {/* ===== Calendario ===== */}
       <div className="card" style={{ padding: 0, opacity: bigLoaderVisible ? 0.35 : 1 }}>
+        {/* Header */}
         <div
           style={{
             padding: "12px 14px",
             borderBottom: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            display: "grid",
             gap: 10,
-            flexWrap: "wrap",
           }}
         >
-          <div>
-            <strong>Calendario de pagos</strong>
-            <span className="muted" style={{ marginLeft: 8 }}>
-              — amarillo: vence ≤ 48 h · verde: &gt; 48 h · rojo: vencido · azul: pagado
-            </span>
-            {fetchingPayments && (
-              <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
-                (actualizando…)
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <strong>Calendario de pagos</strong>
+              <span className="muted" style={{ marginLeft: 8 }}>
+                — amarillo: vence ≤ 48 h · verde: &gt; 48 h · rojo: vencido · azul: pagado
               </span>
-            )}
+              {fetchingPayments && (
+                <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+                  (actualizando…)
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Toggle por encima del calendario */}
+          {/* Tema + + */}
           <div
             style={{
-              display: "inline-flex",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            <button
-              type="button"
-              onClick={() => setDateMode("due")}
-              className="btn btn-ghost"
-              title="Mostrar todos por fecha de vencimiento"
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+                Tema:
+              </span>
+
+              {/* 1) botón principal: SINGLE */}
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setOpenTopicSingle(true)}
+                disabled={loadingTeams || !!errTeams}
+                title={errTeams ? "Error al cargar equipos" : "Elegir tema principal"}
+              >
+                {selectedTeamsLabel}
+              </button>
+
+              {/* 2) botón +: aparece solo si ya hay un tema */}
+              {topicReady && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setOpenTeamsManage(true)}
+                  title="Agregar más temas"
+                  style={{ fontWeight: 900 }}
+                >
+                  +
+                </button>
+              )}
+
+              {topicReady && (
+                <button type="button" className="btn btn-ghost" onClick={clearTeams}>
+                  Limpiar
+                </button>
+              )}
+
+              {!topicReady && (
+                <span
+                  className="badge"
+                  style={{
+                    background: "#fee2e2",
+                    color: "#991b1b",
+                    border: "1px solid rgba(0,0,0,.08)",
+                    fontWeight: 800,
+                  }}
+                >
+                  Seleccioná 1 tema
+                </span>
+              )}
+            </div>
+
+            {/* Toggle fecha */}
+            <div
               style={{
-                padding: "6px 10px",
-                background: dateMode === "due" ? "var(--bg-soft)" : "transparent",
-                fontWeight: dateMode === "due" ? 800 : 600,
+                display: "inline-flex",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                overflow: "hidden",
               }}
             >
-              Todos
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateMode("upcoming")}
-              className="btn btn-ghost"
-              title="Mostrar pendientes en fecha (no vencidos)"
-              style={{
-                padding: "6px 10px",
-                background: dateMode === "upcoming" ? "var(--bg-soft)" : "transparent",
-                fontWeight: dateMode === "upcoming" ? 800 : 600,
-                borderLeft: "1px solid var(--border)",
-              }}
-            >
-              En fecha
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateMode("paid")}
-              className="btn btn-ghost"
-              title="Mostrar por fecha de pago realizado"
-              style={{
-                padding: "6px 10px",
-                background: dateMode === "paid" ? "var(--bg-soft)" : "transparent",
-                fontWeight: dateMode === "paid" ? 800 : 600,
-                borderLeft: "1px solid var(--border)",
-              }}
-            >
-              Pagado
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateMode("overdue")}
-              className="btn btn-ghost"
-              title="Mostrar solo los pagos vencidos"
-              style={{
-                padding: "6px 10px",
-                background: dateMode === "overdue" ? "var(--bg-soft)" : "transparent",
-                fontWeight: dateMode === "overdue" ? 800 : 600,
-                borderLeft: "1px solid var(--border)",
-              }}
-            >
-              Vencidos
-            </button>
+              <button
+                type="button"
+                onClick={() => setDateMode("due")}
+                className="btn btn-ghost"
+                style={{
+                  padding: "6px 10px",
+                  background: dateMode === "due" ? "var(--bg-soft)" : "transparent",
+                  fontWeight: dateMode === "due" ? 800 : 600,
+                }}
+              >
+                Todos
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateMode("upcoming")}
+                className="btn btn-ghost"
+                style={{
+                  padding: "6px 10px",
+                  background: dateMode === "upcoming" ? "var(--bg-soft)" : "transparent",
+                  fontWeight: dateMode === "upcoming" ? 800 : 600,
+                  borderLeft: "1px solid var(--border)",
+                }}
+              >
+                En fecha
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateMode("paid")}
+                className="btn btn-ghost"
+                style={{
+                  padding: "6px 10px",
+                  background: dateMode === "paid" ? "var(--bg-soft)" : "transparent",
+                  fontWeight: dateMode === "paid" ? 800 : 600,
+                  borderLeft: "1px solid var(--border)",
+                }}
+              >
+                Pagado
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateMode("overdue")}
+                className="btn btn-ghost"
+                style={{
+                  padding: "6px 10px",
+                  background: dateMode === "overdue" ? "var(--bg-soft)" : "transparent",
+                  fontWeight: dateMode === "overdue" ? 800 : 600,
+                  borderLeft: "1px solid var(--border)",
+                }}
+              >
+                Vencidos
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Calendarios */}
-        <div style={{ height: 600 }}>
-          {dateMode === "due" && (
-            <Calendar
-              key="calendar-due"
-              localizer={localizer}
-              culture="es"
-              events={eventsDue}
-              defaultView={Views.MONTH}
-              view={view}
-              onView={(v) => setView(v)}
-              views={[Views.MONTH, Views.WEEK, Views.DAY]}
-              startAccessor="start"
-              endAccessor="end"
-              selectable
-              onSelectSlot={onSelectSlot}
-              onSelectEvent={onSelectEvent}
-              onNavigate={setViewDate}
-              eventPropGetter={eventPropGetter}
-              components={{ toolbar: ModernToolbar, event: EventPill }}
-              popup
-              min={minTime}
-              max={maxTime}
-              step={30}
-              timeslots={2}
-              scrollToTime={scrollTo}
-              messages={{
-                month: "Mes",
-                week: "Semana",
-                day: "Día",
-                today: "Hoy",
-                previous: "Anterior",
-                next: "Siguiente",
-                allDay: "Todo el día",
-                noEventsInRange: "No hay pagos en este rango",
-                date: "Fecha",
-                time: "Hora",
-                event: "Pago",
-                showMore: (total) => `+${total} más`,
-              }}
-            />
-          )}
-
-          {dateMode === "upcoming" && (
-            <Calendar
-              key="calendar-upcoming"
-              localizer={localizer}
-              culture="es"
-              events={eventsUpcoming}
-              defaultView={Views.MONTH}
-              view={view}
-              onView={(v) => setView(v)}
-              views={[Views.MONTH, Views.WEEK, Views.DAY]}
-              startAccessor="start"
-              endAccessor="end"
-              selectable
-              onSelectSlot={onSelectSlot}
-              onSelectEvent={onSelectEvent}
-              onNavigate={setViewDate}
-              eventPropGetter={eventPropGetter}
-              components={{ toolbar: ModernToolbar, event: EventPill }}
-              popup
-              min={minTime}
-              max={maxTime}
-              step={30}
-              timeslots={2}
-              scrollToTime={scrollTo}
-              messages={{
-                month: "Mes",
-                week: "Semana",
-                day: "Día",
-                today: "Hoy",
-                previous: "Anterior",
-                next: "Siguiente",
-                allDay: "Todo el día",
-                noEventsInRange: "No hay pagos pendientes en fecha en este rango",
-                date: "Fecha",
-                time: "Hora",
-                event: "Pago",
-                showMore: (total) => `+${total} más`,
-              }}
-            />
-          )}
-
-          {dateMode === "paid" && (
-            <Calendar
-              key="calendar-paid"
-              localizer={localizer}
-              culture="es"
-              events={eventsPaid}
-              defaultView={Views.MONTH}
-              view={view}
-              onView={(v) => setView(v)}
-              views={[Views.MONTH, Views.WEEK, Views.DAY]}
-              startAccessor="start"
-              endAccessor="end"
-              selectable
-              onSelectSlot={onSelectSlot}
-              onSelectEvent={onSelectEvent}
-              onNavigate={setViewDate}
-              eventPropGetter={eventPropGetter}
-              components={{ toolbar: ModernToolbar, event: EventPill }}
-              popup
-              min={minTime}
-              max={maxTime}
-              step={30}
-              timeslots={2}
-              scrollToTime={scrollTo}
-              messages={{
-                month: "Mes",
-                week: "Semana",
-                day: "Día",
-                today: "Hoy",
-                previous: "Anterior",
-                next: "Siguiente",
-                allDay: "Todo el día",
-                noEventsInRange: "No hay pagos realizados en este rango",
-                date: "Fecha",
-                time: "Hora",
-                event: "Pago",
-                showMore: (total) => `+${total} más`,
-              }}
-            />
-          )}
-
-          {dateMode === "overdue" && (
-            <Calendar
-              key="calendar-overdue"
-              localizer={localizer}
-              culture="es"
-              events={eventsOverdue}
-              defaultView={Views.MONTH}
-              view={view}
-              onView={(v) => setView(v)}
-              views={[Views.MONTH, Views.WEEK, Views.DAY]}
-              startAccessor="start"
-              endAccessor="end"
-              selectable
-              onSelectSlot={onSelectSlot}
-              onSelectEvent={onSelectEvent}
-              onNavigate={setViewDate}
-              eventPropGetter={eventPropGetter}
-              components={{ toolbar: ModernToolbar, event: EventPill }}
-              popup
-              min={minTime}
-              max={maxTime}
-              step={30}
-              timeslots={2}
-              scrollToTime={scrollTo}
-              messages={{
-                month: "Mes",
-                week: "Semana",
-                day: "Día",
-                today: "Hoy",
-                previous: "Anterior",
-                next: "Siguiente",
-                allDay: "Todo el día",
-                noEventsInRange: "No hay pagos vencidos en este rango",
-                date: "Fecha",
-                time: "Hora",
-                event: "Pago",
-                showMore: (total) => `+${total} más`,
-              }}
-            />
+          {/* Chips de equipos seleccionados */}
+          {teamsSelected.length > 0 && (
+            <div className="chips">
+              {teamsSelected.map((t) => (
+                <span key={t._id} className="chip">
+                  {t.name}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTeamsSelected((prev) => {
+                        const next = prev.filter((x) => x._id !== t._id);
+                        if (next.length === 0) setOpenTopicSingle(true);
+                        return next;
+                      })
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
           )}
         </div>
-      </div>
 
-      {/* ===== Filtros ===== */}
-      <div className="card" style={{ marginTop: 12, opacity: bigLoaderVisible ? 0.35 : 1 }}>
-        <div className="card-sub" style={{ marginBottom: 8 }}>
-          Filtros (afectan al calendario y a la lista)
-        </div>
+        {/* Calendario */}
+        <div style={{ height: 600, position: "relative" }}>
+          {!topicReady && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 20,
+                display: "grid",
+                placeItems: "center",
+                padding: 16,
+                background: "rgba(255,255,255,.8)",
+                backdropFilter: "blur(2px)",
+              }}
+            >
+              <div className="card" style={{ maxWidth: 520, width: "100%" }}>
+                <div style={{ fontWeight: 900, fontSize: 16 }}>Elegí qué querés ver</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Para ver el calendario y la lista de pagos tenés que seleccionar un tema.
+                </div>
+                <div className="btn-row" style={{ marginTop: 12 }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setOpenTopicSingle(true)}
+                    disabled={loadingTeams || !!errTeams}
+                  >
+                    Elegir tema
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
-        <label className="label">Equipo(s)</label>
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={() => setOpenTeams(true)}
-            disabled={loadingTeams || !!errTeams}
-            title={errTeams ? "Error al cargar equipos" : undefined}
+          <div
+            style={{
+              height: "100%",
+              opacity: topicReady ? 1 : 0.35,
+              pointerEvents: topicReady ? "auto" : "none",
+            }}
           >
-            + Elegir equipos
-          </button>
-          {(usersSelected.length > 0 || teamsSelected.length > 0) && (
-            <button type="button" className="btn btn-ghost" onClick={clearFilters}>
-              Limpiar filtros
-            </button>
-          )}
-        </div>
-
-        {teamsSelected.length > 0 && (
-          <div className="chips" style={{ marginTop: 8 }}>
-            {teamsSelected.map((t) => (
-              <span key={t._id} className="chip">
-                {t.name}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTeamsSelected((prev) => prev.filter((x) => x._id !== t._id))
-                  }
-                >
-                  ×
-                </button>
-              </span>
-            ))}
+            <Calendar
+              key={`calendar-${dateMode}`}
+              localizer={localizer}
+              culture="es"
+              events={calendarEvents}
+              defaultView={Views.MONTH}
+              view={view}
+              onView={(v) => setView(v)}
+              views={[Views.MONTH, Views.WEEK, Views.DAY]}
+              startAccessor="start"
+              endAccessor="end"
+              selectable
+              onSelectSlot={onSelectSlot}
+              onSelectEvent={onSelectEvent}
+              onNavigate={setViewDate}
+              eventPropGetter={eventPropGetter}
+              components={{ toolbar: ModernToolbar, event: EventPill }}
+              popup
+              min={minTime}
+              max={maxTime}
+              step={30}
+              timeslots={2}
+              scrollToTime={scrollTo}
+              messages={{
+                month: "Mes",
+                week: "Semana",
+                day: "Día",
+                today: "Hoy",
+                previous: "Anterior",
+                next: "Siguiente",
+                allDay: "Todo el día",
+                noEventsInRange: noEventsMessage,
+                date: "Fecha",
+                time: "Hora",
+                event: "Pago",
+                showMore: (total) => `+${total} más`,
+              }}
+            />
           </div>
-        )}
-
-        <label className="label" style={{ marginTop: 12 }}>
-          Usuario(s)
-        </label>
-        <div className="btn-row">
-          <button type="button" className="btn btn-outline" onClick={() => setOpenUsers(true)}>
-            + Elegir usuarios
-          </button>
         </div>
-
-        {usersSelected.length > 0 && (
-          <div className="chips" style={{ marginTop: 8 }}>
-            {usersSelected.map((u) => (
-              <span key={u._id} className="chip">
-                {fullName(u) || u.email}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setUsersSelected((prev) => prev.filter((x) => x._id !== u._id))
-                  }
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ===== Encabezado + Rango ===== */}
@@ -1315,19 +1211,19 @@ export default function PaymentsCalendar() {
             className="input"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            placeholder="Desde"
             style={{ width: 150 }}
+            disabled={!topicReady}
           />
           <input
             type="date"
             className="input"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            placeholder="Hasta"
             style={{ width: 150 }}
+            disabled={!topicReady}
           />
           {(fromDate || toDate) && (
-            <button type="button" className="btn btn-ghost" onClick={clearRange}>
+            <button type="button" className="btn btn-ghost" onClick={clearRange} disabled={!topicReady}>
               Limpiar
             </button>
           )}
@@ -1335,7 +1231,11 @@ export default function PaymentsCalendar() {
       </div>
 
       {/* ===== Lista ===== */}
-      {!monthList.length ? (
+      {!topicReady ? (
+        <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
+          Elegí un equipo para ver la lista de pagos.
+        </div>
+      ) : !monthList.length ? (
         <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
           No hay pagos con los filtros actuales.
         </div>
@@ -1400,28 +1300,19 @@ export default function PaymentsCalendar() {
 
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {monthList.map((p) => {
-              const dateStr =
-                dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt);
+              const dateStr = dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt);
 
               let badgeStyle: React.CSSProperties = {};
               let badgeText = "Pendiente";
 
               if (p.status === "paid") {
                 badgeText = "Pagado";
-                badgeStyle = {
-                  background: "#fef3c7",
-                  color: "#111",
-                  border: "1px dashed #9CA3AF",
-                };
+                badgeStyle = { background: "#fef3c7", color: "#111", border: "1px dashed #9CA3AF" };
               } else if (p.dueAt) {
                 const hours = differenceInHours(new Date(p.dueAt), new Date());
-                if (hours < 0) {
-                  badgeStyle = { background: "#111827", color: "#fff" };
-                } else if (hours <= 48) {
-                  badgeStyle = { background: "#fee2e2", color: "#b91c1c" };
-                } else {
-                  badgeStyle = { background: "#dcfce7", color: "#065f46" };
-                }
+                if (hours < 0) badgeStyle = { background: "#111827", color: "#fff" };
+                else if (hours <= 48) badgeStyle = { background: "#fee2e2", color: "#b91c1c" };
+                else badgeStyle = { background: "#dcfce7", color: "#065f46" };
               }
 
               return (
@@ -1438,26 +1329,14 @@ export default function PaymentsCalendar() {
                   }}
                   title="Ver detalle"
                 >
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                    }}
-                  >
+                  <div style={{ fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
                     {p.title}
                     <span className="muted" style={{ fontSize: 12 }}>
-                      {Intl.NumberFormat("es-AR", {
-                        style: "currency",
-                        currency: "ARS",
-                      }).format(p.amount)}
+                      {Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(p.amount)}
                     </span>
                   </div>
 
-                  <div className="muted">
-                    {dateMode === "paid" && p.status !== "paid" ? "—" : dateStr}
-                  </div>
+                  <div className="muted">{dateMode === "paid" && p.status !== "paid" ? "—" : dateStr}</div>
 
                   <div>
                     <span className="badge" style={badgeStyle}>
@@ -1471,8 +1350,7 @@ export default function PaymentsCalendar() {
                     </div>
                     {p.status === "paid" && (
                       <div>
-                        Pagado por: <b>{displayUser(p.paidBy)}</b>{" "}
-                        {p.paidAt ? `· el ${formatDateTime(p.paidAt)}` : ""}
+                        Pagado por: <b>{displayUser(p.paidBy)}</b> {p.paidAt ? `· el ${formatDateTime(p.paidAt)}` : ""}
                       </div>
                     )}
                   </div>
@@ -1484,24 +1362,38 @@ export default function PaymentsCalendar() {
       )}
 
       {/* ===== Modales ===== */}
-      {openTeams && (
-        <TeamPickerModal
+
+      {/* Modal 1: elegir tema principal (SINGLE) */}
+      {openTopicSingle && (
+        <TeamSinglePickerModal
           teams={(teamsData ?? []) as Team[]}
-          initiallySelected={teamsSelected}
-          onClose={() => setOpenTeams(false)}
-          onSave={(sel) => {
-            setTeamsSelected(sel);
-            setOpenTeams(false);
+          selectedPrimary={teamsSelected[0] ?? null}
+          onClose={() => setOpenTopicSingle(false)}
+          onSave={(primary) => {
+            setTeamsSelected((prev) => {
+              const rest = prev.filter((t) => t._id !== primary._id);
+              return [primary, ...rest];
+            });
+            setOpenTopicSingle(false);
           }}
         />
       )}
-      {openUsers && (
-        <UserPickerModal
-          initiallySelected={usersSelected}
-          onClose={() => setOpenUsers(false)}
+
+      {/* Modal 2: agregar/quitar más temas (MULTI) */}
+      {openTeamsManage && (
+        <TeamPickerModal
+          teams={(teamsData ?? []) as Team[]}
+          initiallySelected={teamsSelected}
+          onClose={() => setOpenTeamsManage(false)}
           onSave={(sel) => {
-            setUsersSelected(sel);
-            setOpenUsers(false);
+            setTeamsSelected((prev) => {
+              const primary = prev[0];
+              if (!primary) return sel;
+              const exists = sel.some((t) => t._id === primary._id);
+              const rest = sel.filter((t) => t._id !== primary._id);
+              return exists ? [primary, ...rest] : sel;
+            });
+            setOpenTeamsManage(false);
           }}
         />
       )}
@@ -1509,9 +1401,7 @@ export default function PaymentsCalendar() {
       {/* Modal con pagos del día seleccionado */}
       {dayList && (
         <ModalBase
-          title={`Pagos de este día${
-            dayDate ? ` — ${fmt(dayDate, "dd/MM/yyyy", { locale: es })}` : ""
-          }`}
+          title={`Pagos de este día${dayDate ? ` — ${fmt(dayDate, "dd/MM/yyyy", { locale: es })}` : ""}`}
           onClose={closeDayModal}
         >
           {!dayList.length ? (
@@ -1521,8 +1411,7 @@ export default function PaymentsCalendar() {
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {dayList.map((p) => {
-                // === Colores iguales a los eventos ===
-                let left = "#e5e7eb"; // default
+                let left = "#e5e7eb";
                 let chipBg = "#f3f4f6";
                 let chipColor = "#111827";
                 let chipText = "Pendiente";
@@ -1565,7 +1454,6 @@ export default function PaymentsCalendar() {
                       position: "relative",
                     }}
                   >
-                    {/* barrita de color a la izquierda */}
                     <span
                       aria-hidden
                       style={{
@@ -1594,28 +1482,18 @@ export default function PaymentsCalendar() {
                         </div>
                         <span
                           className="badge"
-                          style={{
-                            background: chipBg,
-                            color: chipColor,
-                            border: "1px solid rgba(0,0,0,.08)",
-                          }}
+                          style={{ background: chipBg, color: chipColor, border: "1px solid rgba(0,0,0,.08)" }}
                         >
                           {chipText}
                         </span>
                       </div>
                       <div className="muted" style={{ fontSize: 12 }}>
-                        {Intl.NumberFormat("es-AR", {
-                          style: "currency",
-                          currency: "ARS",
-                        }).format(p.amount)}
+                        {Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(p.amount)}
                         {" · "}
                         {dateMode === "paid" ? formatDateTime(p.paidAt) : formatDateTime(p.dueAt)}
                       </div>
                     </div>
-                    <button
-                      className="btn btn-outline"
-                      onClick={() => nav(`/payments/${p._id}`)}
-                    >
+                    <button className="btn btn-outline" onClick={() => nav(`/payments/${p._id}`)}>
                       Abrir
                     </button>
                   </li>
@@ -1654,15 +1532,7 @@ function ModalBase({
       }}
     >
       <div className="card" style={{ maxWidth: 640, width: "100%" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 10,
-            alignItems: "center",
-            marginBottom: 10,
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontWeight: 800 }}>{title}</div>
           <button className="btn btn-ghost" onClick={onClose}>
             Cerrar
@@ -1674,6 +1544,117 @@ function ModalBase({
   );
 }
 
+/* ===== Modal SINGLE (elegir 1 tema principal) ===== */
+function TeamSinglePickerModal({
+  teams,
+  selectedPrimary,
+  onSave,
+  onClose,
+}: {
+  teams: Team[];
+  selectedPrimary: Team | null;
+  onSave: (team: Team) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const dq = useDebounced(q, 200);
+  const [selectedId, setSelectedId] = useState<string>(selectedPrimary?._id ?? "");
+
+  const pool = useMemo(
+    () => (teams ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [teams]
+  );
+  const filtered = useMemo(() => {
+    const term = dq.trim().toLowerCase();
+    if (!term) return pool;
+    return pool.filter((t) => t.name.toLowerCase().includes(term));
+  }, [pool, dq]);
+
+  const byId = useMemo(() => new Map(pool.map((t) => [t._id, t])), [pool]);
+  const canSave = !!selectedId && byId.has(selectedId);
+
+  const rowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "10px 12px",
+    borderBottom: "1px solid var(--border)",
+    cursor: "pointer",
+  };
+
+  return (
+    <ModalBase title="Elegir tema" onClose={onClose}>
+      <input className="input" placeholder="Buscar equipo…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+        Seleccioná <b>1</b> equipo como tema principal.
+      </div>
+
+      <div style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 12, height: 360, overflowY: "auto" }}>
+        {filtered.map((t) => {
+          const active = t._id === selectedId;
+          return (
+            <div
+              key={t._id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSelectedId(t._id)}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setSelectedId(t._id)}
+              style={{
+                ...rowStyle,
+                background: active ? "var(--bg-soft)" : "transparent",
+                fontWeight: active ? 800 : 600,
+              }}
+              title="Seleccionar"
+            >
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    border: "2px solid var(--border)",
+                    display: "inline-grid",
+                    placeItems: "center",
+                    fontSize: 12,
+                  }}
+                >
+                  {active ? "●" : ""}
+                </span>
+                <div>
+                  <div>{t.name}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    {t.members?.length ?? 0} miembro/s
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {!filtered.length && <div className="muted" style={{ padding: 12 }}>No hay resultados</div>}
+      </div>
+
+      <div className="btn-row" style={{ marginTop: 12 }}>
+        <button
+          className="btn btn-primary"
+          disabled={!canSave}
+          onClick={() => {
+            const team = byId.get(selectedId);
+            if (team) onSave(team);
+          }}
+        >
+          Elegir
+        </button>
+        <button className="btn btn-ghost" onClick={onClose}>
+          Cancelar
+        </button>
+      </div>
+    </ModalBase>
+  );
+}
+
+/* ===== Modal MULTI (agregar más temas) ===== */
 function TeamPickerModal({
   teams,
   initiallySelected,
@@ -1687,9 +1668,7 @@ function TeamPickerModal({
 }) {
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 200);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(initiallySelected.map((t) => t._id))
-  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initiallySelected.map((t) => t._id)));
 
   const pool = useMemo(
     () => (teams ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)),
@@ -1703,10 +1682,7 @@ function TeamPickerModal({
     return pool.filter((t) => t.name.toLowerCase().includes(term));
   }, [pool, dq]);
 
-  const available = useMemo(
-    () => filtered.filter((t) => !selectedIds.has(t._id)),
-    [filtered, selectedIds]
-  );
+  const available = useMemo(() => filtered.filter((t) => !selectedIds.has(t._id)), [filtered, selectedIds]);
 
   function toggle(id: string) {
     setSelectedIds((prev) => {
@@ -1735,14 +1711,8 @@ function TeamPickerModal({
   };
 
   return (
-    <ModalBase title="Elegir equipos" onClose={onClose}>
-      <input
-        className="input"
-        placeholder="Buscar equipo…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        autoFocus
-      />
+    <ModalBase title="Agregar temas" onClose={onClose}>
+      <input className="input" placeholder="Buscar equipo…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
         Click en un equipo para agregarlo. Usá “×” en la barra para quitarlo.
       </div>
@@ -1764,9 +1734,7 @@ function TeamPickerModal({
               role="button"
               tabIndex={0}
               onClick={() => toggle(t._id)}
-              onKeyDown={(e) =>
-                (e.key === "Enter" || e.key === " ") && toggle(t._id)
-              }
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggle(t._id)}
               style={rowStyle}
               title="Agregar a seleccionados"
             >
@@ -1774,11 +1742,7 @@ function TeamPickerModal({
               <div className="muted">{t.members?.length ?? 0} miembro/s</div>
             </div>
           ))}
-          {!available.length && (
-            <div className="muted" style={{ padding: 12 }}>
-              No hay equipos para agregar.
-            </div>
-          )}
+          {!available.length && <div className="muted" style={{ padding: 12 }}>No hay equipos para agregar.</div>}
         </div>
 
         <div
@@ -1788,8 +1752,7 @@ function TeamPickerModal({
             maxHeight: hasSel ? 200 : 0,
             opacity: hasSel ? 1 : 0,
             overflow: "hidden",
-            transition:
-              "max-height .25s ease, opacity .2s ease, padding .2s ease",
+            transition: "max-height .25s ease, opacity .2s ease, padding .2s ease",
           }}
         >
           <div className="muted" style={{ marginBottom: 6 }}>
@@ -1814,179 +1777,7 @@ function TeamPickerModal({
 
       <div className="btn-row" style={{ marginTop: 12 }}>
         <button className="btn btn-primary" onClick={save}>
-          Agregar
-        </button>
-        <button className="btn btn-ghost" onClick={onClose}>
-          Cancelar
-        </button>
-      </div>
-    </ModalBase>
-  );
-}
-
-function UserPickerModal({
-  initiallySelected,
-  excludeIds = [],
-  onSave,
-  onClose,
-}: {
-  initiallySelected: BasicUser[];
-  excludeIds?: string[];
-  onSave: (users: BasicUser[]) => void;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const dq = useDebounced(q, 250);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(initiallySelected.map((u) => u._id))
-  );
-  const [cache, setCache] = useState<Record<string, BasicUser>>(() =>
-    Object.fromEntries(initiallySelected.map((u) => [u._id, u]))
-  );
-
-  const { data: results, isLoading } = useQuery<BasicUser[]>({
-    queryKey: ["userSearch", dq],
-    queryFn: () => searchUsers(dq),
-    staleTime: 10_000,
-  });
-
-  useEffect(() => {
-    if (results?.length) {
-      setCache((prev) => ({
-        ...prev,
-        ...Object.fromEntries(results.map((u) => [u._id, u])),
-      }));
-    }
-  }, [results]);
-
-  const exclude = useMemo(() => new Set(excludeIds), [excludeIds]);
-  const filtered = useMemo(
-    () => (results ?? []).filter((u) => !exclude.has(u._id)),
-    [results, exclude]
-  );
-
-  const available = useMemo(
-    () => filtered.filter((u) => !selectedIds.has(u._id)),
-    [filtered, selectedIds]
-  );
-
-  function toggle(id: string) {
-    setSelectedIds((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  }
-
-  function save() {
-    const ids = Array.from(selectedIds);
-    const users = ids.map((id) => cache[id]).filter(Boolean) as BasicUser[];
-    onSave(users);
-  }
-
-  const hasSel = selectedIds.size > 0;
-  const rowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "10px 12px",
-    borderBottom: "1px solid var(--border)",
-    cursor: "pointer",
-  };
-
-  return (
-    <ModalBase title="Elegir usuarios" onClose={onClose}>
-      <input
-        className="input"
-        placeholder="Buscar por nombre o email…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        autoFocus
-      />
-      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-        Click en un usuario para agregarlo. Usá “×” en la barra para quitarlo.
-      </div>
-
-      <div
-        style={{
-          marginTop: 10,
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          height: 360,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {isLoading && <div className="card">Buscando…</div>}
-          {!isLoading && !available.length && (
-            <div className="muted" style={{ padding: 12 }}>
-              No hay resultados
-            </div>
-          )}
-          {available.map((u) => {
-            const label =
-              "lastName" in u && (u as any).lastName
-                ? `${u.name ?? ""} ${(u as any).lastName}`.trim()
-                : u.name || "(sin nombre)";
-            return (
-              <div
-                key={u._id}
-                role="button"
-                tabIndex={0}
-                onClick={() => toggle(u._id)}
-                onKeyDown={(e) =>
-                  (e.key === "Enter" || e.key === " ") && toggle(u._id)
-                }
-                style={rowStyle}
-                title="Agregar a seleccionados"
-              >
-                <div style={{ fontWeight: 700 }}>{label}</div>
-                <div className="muted">{u.email}</div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div
-          style={{
-            borderTop: "1px solid var(--border)",
-            padding: hasSel ? "8px 10px" : "0 10px",
-            maxHeight: hasSel ? 200 : 0,
-            opacity: hasSel ? 1 : 0,
-            overflow: "hidden",
-            transition:
-              "max-height .25s ease, opacity .2s ease, padding .2s ease",
-          }}
-        >
-          <div className="muted" style={{ marginBottom: 6 }}>
-            Seleccionados:
-          </div>
-          <div className="chips">
-            {Array.from(selectedIds).map((id) => {
-              const u = cache[id];
-              if (!u) return null;
-              const label =
-                "lastName" in u && (u as any).lastName
-                  ? `${u.name ?? ""} ${(u as any).lastName}`.trim()
-                  : u.name || u.email;
-              return (
-                <span key={id} className="chip">
-                  {label}
-                  <button type="button" onClick={() => toggle(id)}>
-                    ×
-                  </button>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="btn-row" style={{ marginTop: 12 }}>
-        <button className="btn btn-primary" onClick={save}>
-          Agregar
+          Guardar
         </button>
         <button className="btn btn-ghost" onClick={onClose}>
           Cancelar
