@@ -653,7 +653,7 @@ export default function PaymentsCalendar() {
 
     if (event.payment.status === "paid") {
       bg = "#1a17ecff";
-      color = "#111";
+      color = "#f8f4f4ff";
       border = "1px dashed #9CA3AF";
     } else if (event.payment.dueAt) {
       const hours = differenceInHours(new Date(event.payment.dueAt), now);
