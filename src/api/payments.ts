@@ -16,13 +16,15 @@ export type Payment = {
   createdBy?: string | { _id?: string; name?: string; lastName: string; email?: string } | null;
   paidAt?: string | null;
   paidBy?: string | { _id?: string; name?: string; lastName: string; email?: string } | null;
-  description?: string; // antes "notes"
+  description?: string;
 
-  // 👇 usados por los filtros
   assigneeIds?: Array<string | { _id: string; name?: string; lastName: string; email?: string }>;
   teamIds?: Array<string | { _id: string; name: string }>;
-};
 
+  // opcional si lo estás usando en el backend
+  isTemplate?: boolean;
+  templateId?: string | null;
+};
 
 export async function listPayments(params?: { from?: string; to?: string }): Promise<Payment[]> {
   const { data } = await api.get('/payments', { params });
@@ -36,9 +38,25 @@ export async function createPayment(payload: {
   dueAt: string;
   teamIds?: string[];
   assigneeIds?: string[];
+  recurrence?: any;
 }) {
   const { data } = await api.post('/payments', payload);
   return data;
+}
+
+export async function updatePayment(
+  id: string,
+  payload: {
+    title?: string;
+    description?: string;
+    amount?: number;
+    dueAt?: string;
+    teamIds?: string[];
+    paidAt?: string; // ✅ NUEVO
+  },
+): Promise<Payment> {
+  const { data } = await api.patch(`/payments/${id}`, payload);
+  return data as Payment;
 }
 
 export async function reopenPayment(id: string): Promise<Payment> {

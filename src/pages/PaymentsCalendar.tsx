@@ -472,7 +472,8 @@ export default function PaymentsCalendar() {
   // Loader overlay visible en primera carga
   const bigLoaderVisible = (loadingPayments || loadingTeams || loadingMe) && !payments;
 
-  /* ===== Filtro obligatorio por Equipo(s) con “Tema principal + +” ===== */
+  /* ===== Filtro opcional por Equipo(s)
+     ✅ Importante: teamsSelected vacío => "Todos los temas" (sin filtro) ===== */
   const [teamsSelected, setTeamsSelected] = useState<Team[]>([]);
 
   // modal 1: elegir tema principal (SINGLE)
@@ -481,35 +482,25 @@ export default function PaymentsCalendar() {
   // modal 2: agregar/quitar más temas (MULTI)
   const [openTeamsManage, setOpenTeamsManage] = useState(false);
 
-  const topicReady = teamsSelected.length > 0;
-
-  // auto-abrir selector SOLO si no hay tema (una vez)
-  const promptedRef = useRef(false);
-  useEffect(() => {
-    if (promptedRef.current) return;
-    if (loadingTeams || errTeams) return;
-    if (!topicReady) {
-      promptedRef.current = true;
-      setOpenTopicSingle(true);
-    }
-  }, [loadingTeams, errTeams, topicReady]);
-
   function clearTeams() {
+    // ✅ Reset a "ver todo"
     setTeamsSelected([]);
-    setOpenTopicSingle(true);
   }
 
-  // label: muestra principal + “+N”
+  // label: muestra "Todos" cuando no hay selección o cuando están todos
   const selectedTeamsLabel = useMemo(() => {
-    if (!teamsSelected.length) return "Elegí tema…";
+    const total = teamsData?.length ?? 0;
+    if (!total) return "Cargando temas…";
+
+    if (teamsSelected.length === 0 || teamsSelected.length === total) return "Todos los temas";
     if (teamsSelected.length === 1) return teamsSelected[0].name;
     return `${teamsSelected[0].name} +${teamsSelected.length - 1}`;
-  }, [teamsSelected]);
+  }, [teamsSelected, teamsData]);
 
-  // aplicar filtro base (SOLO equipos). Si no hay equipos, no mostramos nada.
+  // aplicar filtro base. Si no hay equipos seleccionados, mostramos TODO.
   const baseFiltered = useMemo(() => {
     const rows = (payments ?? []) as Payment[];
-    if (!teamsSelected.length) return [];
+    if (!teamsSelected.length) return rows;
 
     const hasTeam = (p: any, teamId: string) => {
       const arr = Array.isArray(p.teamIds) ? p.teamIds : [];
@@ -634,12 +625,11 @@ export default function PaymentsCalendar() {
   }, [dateMode, eventsDue, eventsPaid, eventsOverdue, eventsUpcoming]);
 
   const noEventsMessage = useMemo(() => {
-    if (!topicReady) return "Elegí un equipo para ver pagos";
     if (dateMode === "paid") return "No hay pagos realizados en este rango";
     if (dateMode === "overdue") return "No hay pagos vencidos en este rango";
     if (dateMode === "upcoming") return "No hay pagos pendientes en fecha en este rango";
     return "No hay pagos en este rango";
-  }, [dateMode, topicReady]);
+  }, [dateMode]);
 
   // estilos de eventos
   const eventPropGetter = useCallback((event: CalendarEvent) => {
@@ -751,18 +741,16 @@ export default function PaymentsCalendar() {
   /* ===== Interacciones del calendario ===== */
   const onSelectEvent = useCallback(
     (e: CalendarEvent) => {
-      if (!topicReady) return;
       openDayModal(e.start);
     },
-    [openDayModal, topicReady]
+    [openDayModal]
   );
 
   const onSelectSlot = useCallback(
     (slotInfo: any) => {
-      if (!topicReady) return;
       openDayModal(slotInfo.start as Date);
     },
-    [openDayModal, topicReady]
+    [openDayModal]
   );
 
   const minTime = useMemo(() => setSeconds(setMinutes(setHours(new Date(), 6), 0), 0), []);
@@ -784,8 +772,6 @@ export default function PaymentsCalendar() {
   const [sortUnpaidFirst, setSortUnpaidFirst] = useState(false);
 
   const monthList = useMemo(() => {
-    if (!topicReady) return [];
-
     const defaultStart = startOfMonth(viewDate).getTime();
     const defaultEnd = endOfMonth(viewDate).getTime();
     const rangeStart = fromDate ? startOfDayLocal(fromDate).getTime() : defaultStart;
@@ -844,7 +830,7 @@ export default function PaymentsCalendar() {
       });
 
     return rows;
-  }, [baseFiltered, viewDate, sortDue, sortUnpaidFirst, fromDate, toDate, dqText, dateMode, topicReady]);
+  }, [baseFiltered, viewDate, sortDue, sortUnpaidFirst, fromDate, toDate, dqText, dateMode]);
 
   const dateHeaderLabel = dateMode === "paid" ? "Pagado" : "Vencimiento";
 
@@ -863,31 +849,23 @@ export default function PaymentsCalendar() {
     [monthStart, dateMode]
   );
 
-  const ensureTopicOrOpen = useCallback(() => {
-    if (topicReady) return true;
-    setOpenTopicSingle(true);
-    return false;
-  }, [topicReady]);
-
   const exportMonth = useCallback(
     (format: "xlsx" | "csv" = "xlsx") => {
-      if (!ensureTopicOrOpen()) return;
       const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: monthStart, rangeEnd: monthEnd });
       downloadRows(rows, fileBaseName, format);
     },
-    [ensureTopicOrOpen, baseFiltered, dateMode, monthStart, monthEnd, fileBaseName]
+    [baseFiltered, dateMode, monthStart, monthEnd, fileBaseName]
   );
 
   const exportDay = useCallback(
     (format: "xlsx" | "csv" = "xlsx") => {
-      if (!ensureTopicOrOpen()) return;
       const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 0, 0, 0, 0);
       const end = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 23, 59, 59, 999);
       const rows = buildExportRows(baseFiltered, { dateMode, rangeStart: start, rangeEnd: end });
       const base = `${fileBaseName}_${fmt(viewDate, "yyyy-MM-dd")}`;
       downloadRows(rows, base, format);
     },
-    [ensureTopicOrOpen, baseFiltered, dateMode, viewDate, fileBaseName]
+    [baseFiltered, dateMode, viewDate, fileBaseName]
   );
 
   return (
@@ -972,7 +950,7 @@ export default function PaymentsCalendar() {
                 Tema:
               </span>
 
-              {/* 1) botón principal: SINGLE */}
+              {/* 1) botón principal: SINGLE (opcional) */}
               <button
                 type="button"
                 className="btn btn-outline"
@@ -983,37 +961,23 @@ export default function PaymentsCalendar() {
                 {selectedTeamsLabel}
               </button>
 
-              {/* 2) botón +: aparece solo si ya hay un tema */}
-              {topicReady && (
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  onClick={() => setOpenTeamsManage(true)}
-                  title="Agregar más temas"
-                  style={{ fontWeight: 900 }}
-                >
-                  +
-                </button>
-              )}
+              {/* 2) botón +: MULTI (siempre disponible) */}
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setOpenTeamsManage(true)}
+                disabled={loadingTeams || !!errTeams}
+                title="Filtrar por temas (multi)"
+                style={{ fontWeight: 900 }}
+              >
+                +
+              </button>
 
-              {topicReady && (
+              {/* Limpiar filtro -> vuelve a TODOS */}
+              {teamsSelected.length > 0 && (
                 <button type="button" className="btn btn-ghost" onClick={clearTeams}>
-                  Limpiar
+                  Ver todos
                 </button>
-              )}
-
-              {!topicReady && (
-                <span
-                  className="badge"
-                  style={{
-                    background: "#fee2e2",
-                    color: "#991b1b",
-                    border: "1px solid rgba(0,0,0,.08)",
-                    fontWeight: 800,
-                  }}
-                >
-                  Seleccioná 1 tema
-                </span>
               )}
             </div>
 
@@ -1080,7 +1044,7 @@ export default function PaymentsCalendar() {
             </div>
           </div>
 
-          {/* Chips de equipos seleccionados */}
+          {/* Chips de equipos seleccionados (solo cuando hay filtro activo) */}
           {teamsSelected.length > 0 && (
             <div className="chips">
               {teamsSelected.map((t) => (
@@ -1090,9 +1054,8 @@ export default function PaymentsCalendar() {
                     type="button"
                     onClick={() =>
                       setTeamsSelected((prev) => {
-                        const next = prev.filter((x) => x._id !== t._id);
-                        if (next.length === 0) setOpenTopicSingle(true);
-                        return next;
+                        // ✅ si queda vacío, significa "Todos"
+                        return prev.filter((x) => x._id !== t._id);
                       })
                     }
                   >
@@ -1106,44 +1069,7 @@ export default function PaymentsCalendar() {
 
         {/* Calendario */}
         <div style={{ height: 600, position: "relative" }}>
-          {!topicReady && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 20,
-                display: "grid",
-                placeItems: "center",
-                padding: 16,
-                background: "rgba(255,255,255,.8)",
-                backdropFilter: "blur(2px)",
-              }}
-            >
-              <div className="card" style={{ maxWidth: 520, width: "100%" }}>
-                <div style={{ fontWeight: 900, fontSize: 16 }}>Elegí qué querés ver</div>
-                <div className="muted" style={{ marginTop: 6 }}>
-                  Para ver el calendario y la lista de pagos tenés que seleccionar un tema.
-                </div>
-                <div className="btn-row" style={{ marginTop: 12 }}>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => setOpenTopicSingle(true)}
-                    disabled={loadingTeams || !!errTeams}
-                  >
-                    Elegir tema
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div
-            style={{
-              height: "100%",
-              opacity: topicReady ? 1 : 0.35,
-              pointerEvents: topicReady ? "auto" : "none",
-            }}
-          >
+          <div style={{ height: "100%" }}>
             <Calendar
               key={`calendar-${dateMode}`}
               localizer={localizer}
@@ -1212,7 +1138,6 @@ export default function PaymentsCalendar() {
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
             style={{ width: 150 }}
-            disabled={!topicReady}
           />
           <input
             type="date"
@@ -1220,10 +1145,9 @@ export default function PaymentsCalendar() {
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
             style={{ width: 150 }}
-            disabled={!topicReady}
           />
           {(fromDate || toDate) && (
-            <button type="button" className="btn btn-ghost" onClick={clearRange} disabled={!topicReady}>
+            <button type="button" className="btn btn-ghost" onClick={clearRange}>
               Limpiar
             </button>
           )}
@@ -1231,11 +1155,7 @@ export default function PaymentsCalendar() {
       </div>
 
       {/* ===== Lista ===== */}
-      {!topicReady ? (
-        <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
-          Elegí un equipo para ver la lista de pagos.
-        </div>
-      ) : !monthList.length ? (
+      {!monthList.length ? (
         <div className="card" style={{ marginTop: 8, opacity: bigLoaderVisible ? 0.35 : 1 }}>
           No hay pagos con los filtros actuales.
         </div>
@@ -1350,7 +1270,8 @@ export default function PaymentsCalendar() {
                     </div>
                     {p.status === "paid" && (
                       <div>
-                        Pagado por: <b>{displayUser(p.paidBy)}</b> {p.paidAt ? `· el ${formatDateTime(p.paidAt)}` : ""}
+                        Pagado por: <b>{displayUser(p.paidBy)}</b>{" "}
+                        {p.paidAt ? `· el ${formatDateTime(p.paidAt)}` : ""}
                       </div>
                     )}
                   </div>
@@ -1482,7 +1403,11 @@ export default function PaymentsCalendar() {
                         </div>
                         <span
                           className="badge"
-                          style={{ background: chipBg, color: chipColor, border: "1px solid rgba(0,0,0,.08)" }}
+                          style={{
+                            background: chipBg,
+                            color: chipColor,
+                            border: "1px solid rgba(0,0,0,.08)",
+                          }}
                         >
                           {chipText}
                         </span>
@@ -1587,7 +1512,7 @@ function TeamSinglePickerModal({
     <ModalBase title="Elegir tema" onClose={onClose}>
       <input className="input" placeholder="Buscar equipo…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-        Seleccioná <b>1</b> equipo como tema principal.
+        Seleccioná <b>1</b> equipo como tema principal (opcional).
       </div>
 
       <div style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 12, height: 360, overflowY: "auto" }}>
@@ -1668,7 +1593,9 @@ function TeamPickerModal({
 }) {
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 200);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initiallySelected.map((t) => t._id)));
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(initiallySelected.map((t) => t._id))
+  );
 
   const pool = useMemo(
     () => (teams ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)),
@@ -1711,10 +1638,10 @@ function TeamPickerModal({
   };
 
   return (
-    <ModalBase title="Agregar temas" onClose={onClose}>
+    <ModalBase title="Filtrar temas" onClose={onClose}>
       <input className="input" placeholder="Buscar equipo…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-        Click en un equipo para agregarlo. Usá “×” en la barra para quitarlo.
+        Tip: si dejás la selección vacía y guardás, se muestran <b>todos los temas</b>.
       </div>
 
       <div

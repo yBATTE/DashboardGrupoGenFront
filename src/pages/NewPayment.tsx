@@ -49,9 +49,7 @@ function MoneyInputAR({
   placeholder?: string;
   className?: string;
 }) {
-  const [text, setText] = useState<string>(
-    value == null ? "" : AR_CURRENCY.format(value)
-  );
+  const [text, setText] = useState<string>(value == null ? "" : AR_CURRENCY.format(value));
 
   useEffect(() => {
     setText(value == null ? "" : AR_CURRENCY.format(value));
@@ -99,6 +97,20 @@ export default function NewPayment() {
   // modal equipos
   const [openTeams, setOpenTeams] = useState(false);
 
+  // ===== NUEVO: Recurrencia mensual =====
+  const [repeatMonthly, setRepeatMonthly] = useState(false);
+  const [repeatDay, setRepeatDay] = useState<number>(10);
+  const [monthsAhead, setMonthsAhead] = useState<number>(6);
+
+  // si el usuario elige una fecha, usamos su día como default (si no tocó el input)
+  useEffect(() => {
+    if (!dueAt) return;
+    // si el usuario nunca tocó el repeatDay y está en default 10,
+    // preferimos setearlo al día del vencimiento elegido.
+    // (Si querés que siempre sea 10, borrá este useEffect.)
+    setRepeatDay((prev) => (prev === 10 ? dueAt.getDate() : prev));
+  }, [dueAt]);
+
   // Traer equipos (TODOS)
   const { data: allTeams } = useQuery({
     queryKey: ["teams"],
@@ -116,9 +128,7 @@ export default function NewPayment() {
     onSuccess: () => nav("/payments"),
   });
 
-  const isValid = Boolean(
-    title.trim() && amount != null && amount >= 0 && dueAt && teamSelected
-  );
+  const isValid = Boolean(title.trim() && amount != null && amount >= 0 && dueAt && teamSelected);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -126,14 +136,31 @@ export default function NewPayment() {
 
     const normalizedAmount = Number((amount ?? 0).toFixed(2));
 
-    await mutation.mutateAsync({
+    const payload: any = {
       title: title.trim(),
       description: description.trim() || undefined,
       amount: normalizedAmount,
       dueAt: dueAt.toISOString(),
-      teamIds: [teamSelected._id], // ✅ solo 1
-      // ❌ sin assigneeIds
-    });
+      teamIds: [teamSelected._id], // ✅ exactamente 1
+    };
+
+    if (repeatMonthly) {
+      // Derivamos hora/minuto/offset desde la fecha elegida (LOCAL)
+      const hourLocal = dueAt.getHours();
+      const minuteLocal = dueAt.getMinutes();
+      const timezoneOffsetMinutes = dueAt.getTimezoneOffset();
+
+      payload.recurrence = {
+        kind: "monthly_day",
+        dayOfMonth: Math.max(1, Math.min(31, Number(repeatDay || 1))),
+        hourLocal,
+        minuteLocal,
+        timezoneOffsetMinutes,
+        monthsAhead: Math.max(1, Math.min(24, Number(monthsAhead || 6))),
+      };
+    }
+
+    await mutation.mutateAsync(payload);
   }
 
   return (
@@ -182,16 +209,65 @@ export default function NewPayment() {
             popperPlacement="bottom-start"
           />
 
+          {/* ===== NUEVO: Recurrencia ===== */}
+          <div style={{ marginTop: 12, padding: 12, border: "1px solid var(--border)", borderRadius: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800 }}>
+              <input
+                type="checkbox"
+                checked={repeatMonthly}
+                onChange={(e) => setRepeatMonthly(e.target.checked)}
+              />
+              Repetir todos los meses
+            </label>
+
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              Si activás esto, se crea una plantilla y se generan pagos futuros automáticamente (por mes).
+            </div>
+
+            {repeatMonthly && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                <div>
+                  <label className="label">Día del mes (1–31)</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={31}
+                    value={repeatDay}
+                    onChange={(e) => setRepeatDay(Number(e.target.value))}
+                    placeholder="10"
+                  />
+                  <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                    Ej: 10 → “todos los meses el día 10”. Si el mes no tiene ese día, se usa el último día.
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Generar próximos (meses)</label>
+                  <select
+                    className="input"
+                    value={monthsAhead}
+                    onChange={(e) => setMonthsAhead(Number(e.target.value))}
+                  >
+                    <option value={3}>3</option>
+                    <option value={6}>6</option>
+                    <option value={12}>12</option>
+                    <option value={24}>24</option>
+                  </select>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                    Se crean esos meses futuros ya “pendientes”.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* ---------- Equipo (solo 1) ---------- */}
           <label className="label" style={{ marginTop: 12 }}>
             Equipo *
           </label>
           <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => setOpenTeams(true)}
-            >
+            <button type="button" className="btn btn-outline" onClick={() => setOpenTeams(true)}>
               + Elegir equipo
             </button>
 
@@ -227,16 +303,12 @@ export default function NewPayment() {
                 marginTop: 12,
               }}
             >
-              {(mutation.error as any)?.response?.data?.message ??
-                "Error al crear el pago"}
+              {(mutation.error as any)?.response?.data?.message ?? "Error al crear el pago"}
             </div>
           )}
 
           <div className="btn-row" style={{ marginTop: 16 }}>
-            <button
-              className="btn btn-primary"
-              disabled={mutation.isPending || !isValid}
-            >
+            <button className="btn btn-primary" disabled={mutation.isPending || !isValid}>
               {mutation.isPending ? "Creando…" : "Crear"}
             </button>
             <Link to="/teams" className="btn btn-outline">
